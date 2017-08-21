@@ -164,6 +164,10 @@ int sh_call_cb(schema_t* sh) {
 const char* sh_get_path(schema_t* sh) {
     return sh->path;
 }
+int sh_arg_exists(schema_t* sh, value_t** vals, uint32_t idx) {
+    lassert(sh->max_index >= idx);
+    return !!vals[idx];
+}
 int sh_arg_flag(schema_t* sh, value_t** vals, uint32_t idx) {
     lassert(sh->max_index >= idx);
     if (vals[idx]) {

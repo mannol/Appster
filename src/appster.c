@@ -162,7 +162,7 @@ void as_free(appster_t* a) {
 #endif
 
     vector_destroy(a->loops);
-    hm_foreach(a->routes, hm_cb_free, NULL);
+    hm_foreach(a->routes, hm_cb_sh_free, NULL);
     hm_free(a->routes);
     hm_foreach(a->error_cbs, hm_cb_free, (void*) 1);
     hm_free(a->error_cbs);
@@ -234,7 +234,7 @@ int as_bind(appster_t* a, const char* addr, uint16_t port, int backlog) {
     return 0;
 }
 int as_loop(appster_t* a) {
-    int err;
+    int err = 0;
     vector_t threads;
     uv_thread_t id;
 
@@ -267,6 +267,10 @@ int as_loop(appster_t* a) {
     }
 
     return err;
+}
+int as_arg_exists(uint32_t idx) {
+    lassert(__active_ctx && __active_ctx->sh);
+    return sh_arg_exists(__active_ctx->sh, __active_ctx->vars, idx);
 }
 int as_arg_flag(uint32_t idx) {
     lassert(__active_ctx && __active_ctx->sh);
@@ -307,6 +311,45 @@ const char* as_arg_list_string(uint32_t idx, uint32_t list_idx) {
 uint32_t as_arg_list_string_length(uint32_t idx, uint32_t list_idx) {
     lassert(__active_ctx && __active_ctx->sh);
     return sh_arg_list_string_length(__active_ctx->sh, __active_ctx->vars, idx, list_idx);
+}
+int as_write(const char* data, int64_t len) {
+    lassert(__active_ctx);
+    if (!__active_ctx->send_body)
+        __active_ctx->send_body = evbuffer_new();
+    if (len < 0)
+        len = strlen(data);
+    return evbuffer_add(__active_ctx->send_body, data, len);
+}
+int as_write_f(const char* format, ...) {
+    lassert(__active_ctx);
+    int rc;
+    va_list ap;
+
+    lassert(__active_ctx);
+    if (!__active_ctx->send_body)
+        __active_ctx->send_body = evbuffer_new();
+
+    va_start(ap, format);
+    rc = evbuffer_add_vprintf(__active_ctx->send_body, format, ap);
+    va_end(ap);
+    return rc;
+}
+int as_write_fd(int fd, int64_t offset, int64_t len) {
+    lassert(__active_ctx);
+    if (!__active_ctx->send_body)
+        __active_ctx->send_body = evbuffer_new();
+
+    return evbuffer_add_file(__active_ctx->send_body, fd, offset, len);
+}
+int as_write_file(const char* path, int64_t offset, int64_t len) {
+    int fd;
+
+    fd = open(path, O_RDONLY);
+    if (fd != -1)
+        return as_write_fd(fd, offset, len);
+
+    ELOG("Failed to open file: %s", strerror(errno));
+    return -1;
 }
 
 void to_lower(char* str) {
@@ -379,7 +422,7 @@ void execute_context() {
     // This code is executed in coroutine. It's best to keep the stack as low
     // as possible.
 
-    int status, handle;
+    int status;
     context_t* ctx;
     appster_t* a;
 

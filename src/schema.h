@@ -20,6 +20,7 @@ void sh_free_values(schema_t* sh, value_t** val);
 int sh_call_cb(schema_t* sh);
 const char* sh_get_path(schema_t* sh);
 
+int sh_arg_exists(schema_t* sh, value_t** vals, uint32_t idx);
 int sh_arg_flag(schema_t* sh, value_t** vals, uint32_t idx);
 uint64_t sh_arg_integer(schema_t* sh, value_t** vals, uint32_t idx);
 double sh_arg_number(schema_t* sh, value_t** vals, uint32_t idx);
