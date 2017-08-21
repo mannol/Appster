@@ -11,7 +11,7 @@
 typedef struct appster_s appster_t;
 typedef int (*as_route_cb_t) ();
 
-#ifndef DISALBE_REDIS
+#ifndef DISABLE_REDIS
 typedef struct redis_reply_s {
     uint32_t is_integer:1;
     uint32_t is_string:1;
@@ -45,18 +45,18 @@ typedef enum appster_value_type_e {
     AVT_ENCODED_STRING_LIST,
 } appster_value_type_t;
 
-typedef struct appster_shema_entry_s {
+typedef struct appster_schema_entry_s {
     const char* key;
     uint32_t index;
     appster_value_type_t type;
     int is_required;
-} appster_shema_entry_t;
+} appster_schema_entry_t;
 
 appster_t* as_alloc(unsigned threads);
 void as_free(appster_t* a);
 
 // NOTE: once added, route cannot be romoved!
-int as_add_route(appster_t* a, const char* path, as_route_cb_t cb, appster_shema_entry_t* shema, void* user_data);
+int as_add_route(appster_t* a, const char* path, as_route_cb_t cb, appster_schema_entry_t* schema, void* user_data);
 int as_add_route_error(appster_t* a, const char* path, as_route_cb_t cb, void* user_data);
 
 int as_bind(appster_t* a, const char* addr, uint16_t port, int backlog);
@@ -74,7 +74,7 @@ double as_arg_list_number(uint32_t idx, uint32_t list_idx);
 const char* as_arg_list_string(uint32_t idx, uint32_t list_idx);
 uint32_t as_arg_list_string_length(uint32_t idx, uint32_t list_idx);
 
-#ifndef DISALBE_REDIS
+#ifndef DISABLE_REDIS
 void as_add_redis(appster_t* a, const char* ip, uint16_t port);
 void as_add_redis_shard(appster_t* a, const char* ns, const char* ip, uint16_t port);
 //

@@ -1,4 +1,4 @@
-#include "shema.h"
+#include "schema.h"
 #include "hashmap.h"
 #include "log.h"
 #include "format.h"
@@ -43,7 +43,7 @@ typedef struct argument_s {
     uint32_t is_required:1;
 } argument_t;
 
-struct shema_s {
+struct schema_s {
     hashmap_t* args;
     uint32_t max_index;
     char* path;
@@ -76,11 +76,11 @@ static parse_cb_t p_parse_function[] = {
     parse_encoded_string_list
 };
 
-shema_t* sh_alloc(const char* path, const appster_shema_entry_t* entries, as_route_cb_t cb, void* user_data) {
-    shema_t* rc;
+schema_t* sh_alloc(const char* path, const appster_schema_entry_t* entries, as_route_cb_t cb, void* user_data) {
+    schema_t* rc;
     argument_t* arg;
 
-    rc = calloc(1, sizeof(shema_t));
+    rc = calloc(1, sizeof(schema_t));
 
     rc->args = hm_alloc(10, NULL, NULL);
 
@@ -101,7 +101,7 @@ shema_t* sh_alloc(const char* path, const appster_shema_entry_t* entries, as_rou
     rc->path = strdup(path);
     return rc;
 }
-void sh_free(shema_t* s) {
+void sh_free(schema_t* s) {
     if (!s) {
         return;
     }
@@ -112,7 +112,7 @@ void sh_free(shema_t* s) {
     free(s->path);
     free(s);
 }
-value_t** sh_parse(shema_t* sh, char* args) {
+value_t** sh_parse(schema_t* sh, char* args) {
     char* it,* s,* t;
     value_t** rc,* value;
     argument_t* arg;
@@ -147,7 +147,7 @@ fail:
     sh_free_values(sh, rc);
     return NULL;
 }
-void sh_free_values(shema_t* sh, value_t** val) {
+void sh_free_values(schema_t* sh, value_t** val) {
     if (!val) {
         return;
     }
@@ -158,13 +158,13 @@ void sh_free_values(shema_t* sh, value_t** val) {
 
     free(val);
 }
-int sh_call_cb(shema_t* sh) {
+int sh_call_cb(schema_t* sh) {
     return sh->cb(sh->user_data);
 }
-const char* sh_get_path(shema_t* sh) {
+const char* sh_get_path(schema_t* sh) {
     return sh->path;
 }
-int sh_arg_flag(shema_t* sh, value_t** vals, uint32_t idx) {
+int sh_arg_flag(schema_t* sh, value_t** vals, uint32_t idx) {
     lassert(sh->max_index >= idx);
     if (vals[idx]) {
         lassert(vals[idx]->type == AVT_FLAG);
@@ -172,7 +172,7 @@ int sh_arg_flag(shema_t* sh, value_t** vals, uint32_t idx) {
     }
     return 0;
 }
-uint64_t sh_arg_integer(shema_t* sh, value_t** vals, uint32_t idx) {
+uint64_t sh_arg_integer(schema_t* sh, value_t** vals, uint32_t idx) {
     lassert(sh->max_index >= idx);
     if (vals[idx]) {
         lassert(vals[idx]->type == AVT_INTEGER);
@@ -180,7 +180,7 @@ uint64_t sh_arg_integer(shema_t* sh, value_t** vals, uint32_t idx) {
     }
     return 0;
 }
-double sh_arg_number(shema_t* sh, value_t** vals, uint32_t idx) {
+double sh_arg_number(schema_t* sh, value_t** vals, uint32_t idx) {
     lassert(sh->max_index >= idx);
     if (vals[idx]) {
         lassert(vals[idx]->type == AVT_NUMBER);
@@ -188,7 +188,7 @@ double sh_arg_number(shema_t* sh, value_t** vals, uint32_t idx) {
     }
     return 0;
 }
-const char* sh_arg_string(shema_t* sh, value_t** vals, uint32_t idx) {
+const char* sh_arg_string(schema_t* sh, value_t** vals, uint32_t idx) {
     lassert(sh->max_index >= idx);
     if (vals[idx]) {
         lassert(vals[idx]->type == AVT_STRING);
@@ -196,7 +196,7 @@ const char* sh_arg_string(shema_t* sh, value_t** vals, uint32_t idx) {
     }
     return 0;
 }
-uint32_t sh_arg_string_length(shema_t* sh, value_t** vals, uint32_t idx) {
+uint32_t sh_arg_string_length(schema_t* sh, value_t** vals, uint32_t idx) {
     lassert(sh->max_index >= idx);
     if (vals[idx]) {
         lassert(vals[idx]->type == AVT_STRING);
@@ -204,7 +204,7 @@ uint32_t sh_arg_string_length(shema_t* sh, value_t** vals, uint32_t idx) {
     }
     return 0;
 }
-uint32_t sh_arg_list_length(shema_t* sh, value_t** vals, uint32_t idx) {
+uint32_t sh_arg_list_length(schema_t* sh, value_t** vals, uint32_t idx) {
     lassert(sh->max_index >= idx);
     if (vals[idx]) {
         lassert(vals[idx]->type > AVT_STRING);
@@ -212,7 +212,7 @@ uint32_t sh_arg_list_length(shema_t* sh, value_t** vals, uint32_t idx) {
     }
     return 0;
 }
-uint64_t sh_arg_list_integer(shema_t* sh, value_t** vals, uint32_t idx, uint32_t list_idx) {
+uint64_t sh_arg_list_integer(schema_t* sh, value_t** vals, uint32_t idx, uint32_t list_idx) {
     lassert(sh->max_index >= idx);
     if (vals[idx]) {
         lassert(vals[idx]->type == AVT_INTEGER_LIST);
@@ -221,7 +221,7 @@ uint64_t sh_arg_list_integer(shema_t* sh, value_t** vals, uint32_t idx, uint32_t
     }
     return 0;
 }
-double sh_arg_list_number(shema_t* sh, value_t** vals, uint32_t idx, uint32_t list_idx) {
+double sh_arg_list_number(schema_t* sh, value_t** vals, uint32_t idx, uint32_t list_idx) {
     lassert(sh->max_index >= idx);
     if (vals[idx]) {
         lassert(vals[idx]->type == AVT_NUMBER_LIST);
@@ -230,7 +230,7 @@ double sh_arg_list_number(shema_t* sh, value_t** vals, uint32_t idx, uint32_t li
     }
     return 0;
 }
-const char* sh_arg_list_string(shema_t* sh, value_t** vals, uint32_t idx, uint32_t list_idx) {
+const char* sh_arg_list_string(schema_t* sh, value_t** vals, uint32_t idx, uint32_t list_idx) {
     lassert(sh->max_index >= idx);
     if (vals[idx]) {
         lassert(vals[idx]->type == AVT_STRING_LIST);
@@ -239,7 +239,7 @@ const char* sh_arg_list_string(shema_t* sh, value_t** vals, uint32_t idx, uint32
     }
     return 0;
 }
-uint32_t sh_arg_list_string_length(shema_t* sh, value_t** vals, uint32_t idx, uint32_t list_idx) {
+uint32_t sh_arg_list_string_length(schema_t* sh, value_t** vals, uint32_t idx, uint32_t list_idx) {
     lassert(sh->max_index >= idx);
     if (vals[idx]) {
         lassert(vals[idx]->type == AVT_STRING_LIST);

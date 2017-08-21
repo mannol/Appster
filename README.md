@@ -7,7 +7,7 @@ libdill
 hiredis
 ```
 
-Example: 
+Example:
 
 ```C
 #include "appster.h"
@@ -26,14 +26,14 @@ int exec_route(void* data) {
 }
 
 int main() {
-    appster_shema_entry_t shema[] = {
+    appster_schema_entry_t schema[] = {
         {"hello", 0, AVT_STRING, 1},
         {NULL}
     };
 
     appster_t* a = as_alloc(1);
 
-    as_add_route(a, "/", exec_route, shema, NULL);
+    as_add_route(a, "/", exec_route, schema, NULL);
     as_add_redis(a, "127.0.0.1", 6379);
 
     as_bind(a, "0.0.0.0", 8080, 2048);
