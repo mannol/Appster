@@ -45,18 +45,18 @@ typedef enum appster_value_type_e {
     AVT_ENCODED_STRING_LIST,
 } appster_value_type_t;
 
-typedef struct appster_shema_entry_s {
+typedef struct appster_schema_entry_s {
     const char* key;
     uint32_t index;
     appster_value_type_t type;
     int is_required;
-} appster_shema_entry_t;
+} appster_schema_entry_t;
 
 appster_t* as_alloc(unsigned threads);
 void as_free(appster_t* a);
 
 // NOTE: once added, route cannot be romoved!
-int as_add_route(appster_t* a, const char* path, as_route_cb_t cb, appster_shema_entry_t* shema, void* user_data);
+int as_add_route(appster_t* a, const char* path, as_route_cb_t cb, appster_schema_entry_t* schema, void* user_data);
 int as_add_route_error(appster_t* a, const char* path, as_route_cb_t cb, void* user_data);
 
 int as_bind(appster_t* a, const char* addr, uint16_t port, int backlog);

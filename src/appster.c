@@ -3,7 +3,7 @@
 
 #include "log.h"
 #include "evbuffer.h"
-#include "shema.h"
+#include "schema.h"
 #include "channel.h"
 #include "http_parser.h"
 
@@ -23,7 +23,7 @@ typedef struct context_s {
     hashmap_t* headers,* send_headers;
     evbuffer_t* body,* send_body;
     value_t** vars;
-    shema_t* sh;
+    schema_t* sh;
     channel_t channel;
     int handle;
     char* str;
@@ -169,9 +169,9 @@ void as_free(appster_t* a) {
     free(a->general_error_cb);
     free(a);
 }
-int as_add_route(appster_t* a, const char* path, as_route_cb_t cb, appster_shema_entry_t* shema, void* user_data) {
-    static appster_shema_entry_t empty_shema[] = { { NULL } };
-    shema_t* sh;
+int as_add_route(appster_t* a, const char* path, as_route_cb_t cb, appster_schema_entry_t* schema, void* user_data) {
+    static appster_schema_entry_t empty_schema[] = { { NULL } };
+    schema_t* sh;
 
     lassert(a);
     lassert(path);
@@ -179,13 +179,13 @@ int as_add_route(appster_t* a, const char* path, as_route_cb_t cb, appster_shema
     lassert(path[0] == '/');
     lassert(cb);
 
-    if (!shema) {
-        shema = empty_shema;
+    if (!schema) {
+        schema = empty_schema;
     }
 
-    sh = sh_alloc(path, shema, cb, user_data);
+    sh = sh_alloc(path, schema, cb, user_data);
     if (!sh) {
-        ELOG("Failed to create shema for '%s' from supplied information", path);
+        ELOG("Failed to create schema for '%s' from supplied information", path);
         return -1;
     }
 
@@ -634,7 +634,7 @@ int on_inc_header_field(__AP_DATA_CB) {
         ctx->sh = hm_get(a->routes, it);
 
         if (!ctx->sh) {
-            ELOG("Missing shema for %s", it);
+            ELOG("Missing schema for %s", it);
             return on_parse_error(ctx);
         }
 
