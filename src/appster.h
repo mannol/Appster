@@ -11,7 +11,7 @@
 typedef struct appster_s appster_t;
 typedef int (*as_route_cb_t) ();
 
-#ifndef DISALBE_REDIS
+#ifndef DISABLE_REDIS
 typedef struct redis_reply_s {
     uint32_t is_integer:1;
     uint32_t is_string:1;
@@ -74,7 +74,7 @@ double as_arg_list_number(uint32_t idx, uint32_t list_idx);
 const char* as_arg_list_string(uint32_t idx, uint32_t list_idx);
 uint32_t as_arg_list_string_length(uint32_t idx, uint32_t list_idx);
 
-#ifndef DISALBE_REDIS
+#ifndef DISABLE_REDIS
 void as_add_redis(appster_t* a, const char* ip, uint16_t port);
 void as_add_redis_shard(appster_t* a, const char* ns, const char* ip, uint16_t port);
 //
