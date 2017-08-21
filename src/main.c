@@ -4,15 +4,21 @@
 int exec_route(void* data) {
     redis_reply_t rp;
 
+    as_write("Hello world!\n", -1);
+
+    as_write("Run queries asynchronously without excessive callbacks!\n", -1);
     rp = as_redis("SET hello %s", as_arg_string(0));
     as_free_redis_reply(&rp);
 
     rp = as_redis("GET hello");
-    printf("hello %.*s\n", rp.len, rp.str);
-    fflush(stdout);
+    as_write_f("The execution is paused until query is executed: \"%.*s\"!\n",
+               rp.len, rp.str);
 
     as_free_redis_reply(&rp);
-    return 200;
+
+    as_write_file("example.txt", 0, -1);
+
+    return 200; // return status code
 }
 
 int main() {

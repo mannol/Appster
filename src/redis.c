@@ -230,7 +230,7 @@ void redis_connect_cb(const redisAsyncContext *c, int status)
     uintptr_t idx;
     uv_timer_t* timer;
 
-    idx = c->data;
+    idx = (uintptr_t) c->data;
 
     if (status != REDIS_OK) {
         ELOG("Error: %s", c->errstr);

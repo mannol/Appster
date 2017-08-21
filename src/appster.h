@@ -62,6 +62,10 @@ int as_add_route_error(appster_t* a, const char* path, as_route_cb_t cb, void* u
 int as_bind(appster_t* a, const char* addr, uint16_t port, int backlog);
 int as_loop(appster_t* a);
 
+//
+// Check to see if argument exists. Returns 1 if argument is present or 0
+// if the argument is missing.
+int as_arg_exists(uint32_t idx);
 // Accessors
 int as_arg_flag(uint32_t idx);
 uint64_t as_arg_integer(uint32_t idx);
@@ -73,6 +77,16 @@ uint64_t as_arg_list_integer(uint32_t idx, uint32_t list_idx);
 double as_arg_list_number(uint32_t idx, uint32_t list_idx);
 const char* as_arg_list_string(uint32_t idx, uint32_t list_idx);
 uint32_t as_arg_list_string_length(uint32_t idx, uint32_t list_idx);
+
+//
+// Sending body in reply. These functions queue the reply body. Once added data
+// is not removed until it's written to the wire. The file sending may use mmap
+// or sendfile() api's. Content-Length header is added automatically.
+//
+int as_write(const char* data, int64_t len);
+int as_write_f(const char* format, ...);
+int as_write_fd(int fd, int64_t offset, int64_t len);
+int as_write_file(const char* path, int64_t offset, int64_t len);
 
 #ifndef DISALBE_REDIS
 void as_add_redis(appster_t* a, const char* ip, uint16_t port);

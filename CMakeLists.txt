@@ -1,7 +1,22 @@
-project(AppsterC)
+project(Appster)
 cmake_minimum_required(VERSION 2.8)
-aux_source_directory(src/ SRC_LIST)
+
+set(SRC_LIST
+    src/appster.c
+    src/channel.c
+    src/evbuffer.c
+    src/format.c
+    src/hashmap.c
+    src/http_parser.c
+    src/log.c
+    src/redis.c
+    src/shema.c
+    src/vector.c
+    src/main.c
+)
+
 add_executable(${PROJECT_NAME} ${SRC_LIST})
+
 target_link_libraries(${PROJECT_NAME}
     -ldill
     -lhiredis
@@ -17,6 +32,3 @@ set(CMAKE_C_FLAGS "-Wall -Wno-sign-compare")
 #else()
 #    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2")
 #endif()
-
-# include directories for evhtp because it's borked
-include_directories(/usr/local/include/evhtp/)
