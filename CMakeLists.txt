@@ -33,16 +33,18 @@ target_link_libraries(example_redis ${PROJECT_NAME})
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 find_package(Hiredis)
+find_package(libdill REQUIRED)
 find_package(LibUV REQUIRED)
 
 include_directories(
     ${HIREDIS_INCLUDE_DIR}
+    ${LIBDILL_INCLUDE_DIRS}
     ${LIBUV_INCLUDE_DIRS}
 )
 
 target_link_libraries(${PROJECT_NAME}
-    -ldill
     ${HIREDIS_LIBRARIES}
+    ${LIBDILL_LIBRARIES}
     ${LIBUV_LIBRARIES}
 )
 
