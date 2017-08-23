@@ -8,29 +8,25 @@ cmake_minimum_required(VERSION 2.8)
 set(SRC_LIST
     src/appster.c
     src/channel.c
-    src/evbuffer.c
     src/format.c
-    src/hashmap.c
-    src/http_parser.c
     src/log.c
     src/redis.c
     src/schema.c
-    src/vector.c
 )
 
 add_library(${PROJECT_NAME} ${SRC_LIST})
-
-add_executable(example_body src/examples/body.c)
-add_executable(example_redis src/examples/redis.c)
-
-target_link_libraries(example_body ${PROJECT_NAME})
-target_link_libraries(example_redis ${PROJECT_NAME})
 
 ##
 # Dependencies
 ##
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+
+add_subdirectory(deps)
+include_directories(SYSTEM deps)
+target_link_libraries(${PROJECT_NAME}
+    deps
+)
 
 find_package(Hiredis)
 find_package(libdill REQUIRED)
@@ -67,3 +63,13 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
 else()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2")
 endif()
+
+##
+# Examples
+##
+
+add_executable(example_body src/examples/body.c)
+add_executable(example_redis src/examples/redis.c)
+
+target_link_libraries(example_body ${PROJECT_NAME} deps)
+target_link_libraries(example_redis ${PROJECT_NAME} deps)
