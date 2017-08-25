@@ -28,7 +28,7 @@ __thread uint32_t basic_ctxs_round = 0;
 __thread hashmap_t* ctxs;
 __thread uv_loop_t* loop = NULL;
 
-extern __thread struct context_s* __active_ctx;
+extern __thread struct context_s* __current_ctx;
 
 static redisAsyncContext* get_shard(const char* key, uint32_t len);
 static void redis_steal(redisReply* what, redis_reply_t* to);
@@ -61,19 +61,20 @@ redis_reply_t as_redis(const char *format, ...) {
 }
 redis_reply_t as_redisv(const char *format, va_list ap) {
     // TODO calculate shard
-    redisAsyncContext* ctx;
+    redisAsyncContext* rctx;
     redis_reply_t rc = {0};
     redis_cb_arg_t arg;
+    struct context_s* ctx = __current_ctx;
 
-    ctx = get_shard(NULL, 0);
-    if (!ctx) {
+    rctx = get_shard(NULL, 0);
+    if (!rctx) {
         rc.is_error = 1;
         rc.str = strdup("No active shards");
         rc.len = strlen(rc.str);
         return rc;
     }
 
-    if (redisvAsyncCommand(ctx, redis_cb, &arg, format, ap) != 0) {
+    if (redisvAsyncCommand(rctx, redis_cb, &arg, format, ap) != 0) {
         rc.is_error = 1;
         rc.str = strdup("Error issuing redis command");
         rc.len = strlen(rc.str);
@@ -83,9 +84,8 @@ redis_reply_t as_redisv(const char *format, va_list ap) {
     arg.reply = &rc;
     arg.channel = ch_make();
 
-    struct context_s* _active_ctx = __active_ctx;
     ch_recv(arg.channel); // wait for async command to finish
-    __active_ctx = _active_ctx;
+    __current_ctx = ctx;
 
     return rc;
 }

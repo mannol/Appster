@@ -59,8 +59,7 @@ void as_free(appster_t* a);
 int as_add_route(appster_t* a, const char* path, as_route_cb_t cb, appster_schema_entry_t* schema, void* user_data);
 int as_add_route_error(appster_t* a, const char* path, as_route_cb_t cb, void* user_data);
 
-int as_bind(appster_t* a, const char* addr, uint16_t port, int backlog);
-int as_loop(appster_t* a);
+int as_listen_and_serve(appster_t* a, const char* addr, uint16_t port, int backlog);
 
 //
 // Check to see if argument exists. Returns 1 if argument is present or 0
@@ -87,6 +86,22 @@ int as_write(const char* data, int64_t len);
 int as_write_f(const char* format, ...);
 int as_write_fd(int fd, int64_t offset, int64_t len);
 int as_write_file(const char* path, int64_t offset, int64_t len);
+
+//
+// Read the request body if present. Returns the amount of bytes read or -1
+// if error occured. Reads up to max amount of bytes. The functions do not
+// return until either the whole body is read, the max bytes is read or the
+// error occurs.
+//
+int64_t as_read(char* where, int64_t max);
+//
+// Read from the wire directly to the fd,
+//
+int64_t as_read_to_fd(int fd, int64_t max);
+//
+// Read from the wire directly to the file
+//
+int64_t as_read_to_file(const char* path, int64_t max);
 
 #ifndef DISABLE_REDIS
 void as_add_redis(appster_t* a, const char* ip, uint16_t port);

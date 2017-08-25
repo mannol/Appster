@@ -16,7 +16,7 @@
 #include <stdio.h>
 #include "../appster.h"
 
-int exec_route(void* data) {
+int exec_redis(void* data) {
     redis_reply_t rp; // declare a repply storage
 
     rp = as_redis("SET hello %s", as_arg_string(0)); // execute the command
@@ -43,11 +43,10 @@ int main() {
 
     appster_t* a = as_alloc(1);
 
-    as_add_route(a, "/", exec_route, schema, NULL);
+    as_add_route(a, "/redis", exec_redis, schema, NULL);
     as_add_redis(a, "127.0.0.1", 6379);
 
-    as_bind(a, "0.0.0.0", 8080, 2048);
-    as_loop(a); // after this point, 'a' should not be tampered with!
+    as_listen_and_serve(a, "0.0.0.0", 8080, 2048);
     as_free(a);
     return 0;
 }

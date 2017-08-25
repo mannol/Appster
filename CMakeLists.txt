@@ -68,8 +68,10 @@ endif()
 # Examples
 ##
 
-add_executable(example_body src/examples/body.c)
+add_executable(example_read src/examples/read.c)
+add_executable(example_write src/examples/write.c)
 add_executable(example_redis src/examples/redis.c)
 
-target_link_libraries(example_body ${PROJECT_NAME} deps)
+target_link_libraries(example_read ${PROJECT_NAME} deps)
+target_link_libraries(example_write ${PROJECT_NAME} deps)
 target_link_libraries(example_redis ${PROJECT_NAME} deps)

@@ -24,7 +24,7 @@ typedef struct context_s {
     evbuffer_t* body,* send_body;
     value_t** vars;
     schema_t* sh;
-    channel_t channel;
+    channel_t read_ch;
     int handle;
     char* str;
     struct {
@@ -32,6 +32,7 @@ typedef struct context_s {
         uint32_t parsed_arguments:1;
         uint32_t parsed_field:1;
         uint32_t should_keepalive:1;
+        uint32_t body_done:1;
     } flag;
 #define appster con->tcp->loop->data
 } context_t;
@@ -49,7 +50,7 @@ typedef union addr_u {
     struct sockaddr_in6 sin6[1];
 } addr_t;
 
-__thread context_t* __active_ctx = NULL;
+__thread context_t* __current_ctx = NULL;
 
 #define __AP_PREAMPLE \
     context_t* ctx; \
@@ -210,8 +211,11 @@ int as_add_route_error(appster_t* a, const char* path, as_route_cb_t cb, void* u
 
     return 0;
 }
-int as_bind(appster_t* a, const char* addr, uint16_t port, int backlog) {
+int as_listen_and_serve(appster_t* a, const char* addr, uint16_t port, int backlog) {
     addr_t ad;
+    int err = 0;
+    vector_t threads;
+    uv_thread_t id;
 
     lassert(a);
 
@@ -225,25 +229,12 @@ int as_bind(appster_t* a, const char* addr, uint16_t port, int backlog) {
 
     if (!vector_size(a->loops)) {
         bind_listener(uv_default_loop(), &ad, backlog);
+        uv_default_loop()->data = a;
+        run_loop(uv_default_loop());
     } else  {
         VECTOR_FOR_EACH(a->loops, loop) {
             bind_listener(ITERATOR_GET_AS(uv_loop_t*, &loop), &ad, backlog);
         }
-    }
-
-    return 0;
-}
-int as_loop(appster_t* a) {
-    int err = 0;
-    vector_t threads;
-    uv_thread_t id;
-
-    lassert(a);
-
-    if (!vector_size(a->loops)) {
-        uv_default_loop()->data = a;
-        run_loop(uv_default_loop());
-    } else {
         vector_setup(threads, vector_size(a->loops), sizeof(uv_thread_t));
 
         VECTOR_FOR_EACH(a->loops, loop) {
@@ -269,77 +260,77 @@ int as_loop(appster_t* a) {
     return err;
 }
 int as_arg_exists(uint32_t idx) {
-    lassert(__active_ctx && __active_ctx->sh);
-    return sh_arg_exists(__active_ctx->sh, __active_ctx->vars, idx);
+    lassert(__current_ctx && __current_ctx->sh);
+    return sh_arg_exists(__current_ctx->sh, __current_ctx->vars, idx);
 }
 int as_arg_flag(uint32_t idx) {
-    lassert(__active_ctx && __active_ctx->sh);
-    return sh_arg_flag(__active_ctx->sh, __active_ctx->vars, idx);
+    lassert(__current_ctx && __current_ctx->sh);
+    return sh_arg_flag(__current_ctx->sh, __current_ctx->vars, idx);
 }
 uint64_t as_arg_integer(uint32_t idx) {
-    lassert(__active_ctx && __active_ctx->sh);
-    return sh_arg_integer(__active_ctx->sh, __active_ctx->vars, idx);
+    lassert(__current_ctx && __current_ctx->sh);
+    return sh_arg_integer(__current_ctx->sh, __current_ctx->vars, idx);
 }
 double as_arg_number(uint32_t idx) {
-    lassert(__active_ctx && __active_ctx->sh);
-    return sh_arg_number(__active_ctx->sh, __active_ctx->vars, idx);
+    lassert(__current_ctx && __current_ctx->sh);
+    return sh_arg_number(__current_ctx->sh, __current_ctx->vars, idx);
 }
 const char* as_arg_string(uint32_t idx) {
-    lassert(__active_ctx && __active_ctx->sh);
-    return sh_arg_string(__active_ctx->sh, __active_ctx->vars, idx);
+    lassert(__current_ctx && __current_ctx->sh);
+    return sh_arg_string(__current_ctx->sh, __current_ctx->vars, idx);
 }
 uint32_t as_arg_string_length(uint32_t idx) {
-    lassert(__active_ctx && __active_ctx->sh);
-    return sh_arg_string_length(__active_ctx->sh, __active_ctx->vars, idx);
+    lassert(__current_ctx && __current_ctx->sh);
+    return sh_arg_string_length(__current_ctx->sh, __current_ctx->vars, idx);
 }
 uint32_t as_arg_list_length(uint32_t idx) {
-    lassert(__active_ctx && __active_ctx->sh);
-    return sh_arg_list_length(__active_ctx->sh, __active_ctx->vars, idx);
+    lassert(__current_ctx && __current_ctx->sh);
+    return sh_arg_list_length(__current_ctx->sh, __current_ctx->vars, idx);
 }
 uint64_t as_arg_list_integer(uint32_t idx, uint32_t list_idx) {
-    lassert(__active_ctx && __active_ctx->sh);
-    return sh_arg_list_integer(__active_ctx->sh, __active_ctx->vars, idx, list_idx);
+    lassert(__current_ctx && __current_ctx->sh);
+    return sh_arg_list_integer(__current_ctx->sh, __current_ctx->vars, idx, list_idx);
 }
 double as_arg_list_number(uint32_t idx, uint32_t list_idx) {
-    lassert(__active_ctx && __active_ctx->sh);
-    return sh_arg_list_number(__active_ctx->sh, __active_ctx->vars, idx, list_idx);
+    lassert(__current_ctx && __current_ctx->sh);
+    return sh_arg_list_number(__current_ctx->sh, __current_ctx->vars, idx, list_idx);
 }
 const char* as_arg_list_string(uint32_t idx, uint32_t list_idx) {
-    lassert(__active_ctx && __active_ctx->sh);
-    return sh_arg_list_string(__active_ctx->sh, __active_ctx->vars, idx, list_idx);
+    lassert(__current_ctx && __current_ctx->sh);
+    return sh_arg_list_string(__current_ctx->sh, __current_ctx->vars, idx, list_idx);
 }
 uint32_t as_arg_list_string_length(uint32_t idx, uint32_t list_idx) {
-    lassert(__active_ctx && __active_ctx->sh);
-    return sh_arg_list_string_length(__active_ctx->sh, __active_ctx->vars, idx, list_idx);
+    lassert(__current_ctx && __current_ctx->sh);
+    return sh_arg_list_string_length(__current_ctx->sh, __current_ctx->vars, idx, list_idx);
 }
 int as_write(const char* data, int64_t len) {
-    lassert(__active_ctx);
-    if (!__active_ctx->send_body)
-        __active_ctx->send_body = evbuffer_new();
+    lassert(__current_ctx);
+    if (!__current_ctx->send_body)
+        __current_ctx->send_body = evbuffer_new();
     if (len < 0)
         len = strlen(data);
-    return evbuffer_add(__active_ctx->send_body, data, len);
+    return evbuffer_add(__current_ctx->send_body, data, len);
 }
 int as_write_f(const char* format, ...) {
-    lassert(__active_ctx);
+    lassert(__current_ctx);
     int rc;
     va_list ap;
 
-    lassert(__active_ctx);
-    if (!__active_ctx->send_body)
-        __active_ctx->send_body = evbuffer_new();
+    lassert(__current_ctx);
+    if (!__current_ctx->send_body)
+        __current_ctx->send_body = evbuffer_new();
 
     va_start(ap, format);
-    rc = evbuffer_add_vprintf(__active_ctx->send_body, format, ap);
+    rc = evbuffer_add_vprintf(__current_ctx->send_body, format, ap);
     va_end(ap);
     return rc;
 }
 int as_write_fd(int fd, int64_t offset, int64_t len) {
-    lassert(__active_ctx);
-    if (!__active_ctx->send_body)
-        __active_ctx->send_body = evbuffer_new();
+    lassert(__current_ctx);
+    if (!__current_ctx->send_body)
+        __current_ctx->send_body = evbuffer_new();
 
-    return evbuffer_add_file(__active_ctx->send_body, fd, offset, len);
+    return evbuffer_add_file(__current_ctx->send_body, fd, offset, len);
 }
 int as_write_file(const char* path, int64_t offset, int64_t len) {
     int fd;
@@ -350,6 +341,92 @@ int as_write_file(const char* path, int64_t offset, int64_t len) {
 
     ELOG("Failed to open file: %s", strerror(errno));
     return -1;
+}
+int64_t as_read(char* where, int64_t max) {
+    // TODO handle connection close
+    context_t* ctx = __current_ctx;
+    int rc = 0, tp;
+
+    lassert(ctx);
+    if (!ctx->body) // no body!!!
+        return 0;
+
+
+    // check if the bytes are here or read what we can if body is done
+    if (evbuffer_get_length(ctx->body) >= max || ctx->flag.body_done) {
+        rc = evbuffer_remove(ctx->body, where, max);
+        goto check_and_free;
+    }
+
+    ctx->read_ch = ch_make();
+
+    uv_read_start((uv_stream_t*)ctx->con->tcp, alloc_cb, read_cb);
+
+    while (evbuffer_get_length(ctx->body) < max && !ctx->flag.body_done) {
+        ch_pass(ctx->read_ch); // wait for a signal
+
+        // read the data right away to avoid the buffering
+        tp = evbuffer_remove(ctx->body, where, max);
+        max -= tp;
+        rc += tp;
+
+        // if the entire body has been read, stop reading
+    }
+
+    ch_close(ctx->read_ch); // close the signal handler
+
+    // stop reading the connection
+    uv_read_stop((uv_stream_t*)ctx->con->tcp);
+
+    __current_ctx = ctx;
+
+check_and_free:
+    if (ctx->flag.body_done) {
+        if (!evbuffer_get_length(ctx->body)) {
+            evbuffer_free(ctx->body);
+            ctx->body = NULL;
+        }
+    }
+
+    return rc;
+}
+int64_t as_read_to_fd(int fd, int64_t max) {
+    int rc = 0, seg = 0;
+    int64_t tot = 0;
+
+    if (max <= 0)
+        return max;
+
+    do {
+        max -= rc;
+        tot += rc;
+        seg = MIN(max, 1024);
+
+        char buf[seg];
+        rc = as_read(buf, seg);
+
+        DLOG("Writing %d %d", rc, seg);
+        if (rc > 0)
+            rc = write(fd, buf, rc);
+
+    } while (rc > 0 && rc == seg);
+
+    if (rc < 0)
+        return rc;
+
+    return tot;
+}
+int64_t as_read_to_file(const char* path, int64_t max) {
+    int fd, rc;
+
+    lassert(__current_ctx);
+    if (!__current_ctx->body) // no body!!!
+        return 0;
+
+    fd = open(path, O_WRONLY|O_CREAT, 0666);
+    rc = as_read_to_fd(fd, max);
+    close(fd);
+    return rc;
 }
 
 void to_lower(char* str) {
@@ -426,7 +503,7 @@ void execute_context() {
     context_t* ctx;
     appster_t* a;
 
-    ctx = __active_ctx;
+    ctx = __current_ctx;
     a = ctx->appster;
 
     if (ctx->flag.parse_error) {
@@ -441,7 +518,7 @@ void execute_context() {
         status = sh_call_cb(ctx->sh);
     }
 
-    __active_ctx = NULL;
+    __current_ctx = NULL;
 
     if (status > 0) {
         send_reply(ctx, status);
@@ -646,6 +723,7 @@ int on_message_begin(__AP_EVENT_CB) {
     ctx->body = evbuffer_new();
     ctx->con = con;
     ctx->handle = -1;
+    ctx->read_ch.id = -1;
 
     vector_push_back(con->contexts, &ctx);
     return 0;
@@ -739,6 +817,7 @@ int on_inc_headers_complete(__AP_EVENT_CB) {
     if (http_body_is_final(p)) {
         evbuffer_free(ctx->body);
         ctx->body = NULL;
+        ctx->flag.body_done = 1;
     }
 
     if (http_should_keep_alive(p) && !ctx->flag.parse_error) {
@@ -748,7 +827,7 @@ int on_inc_headers_complete(__AP_EVENT_CB) {
     // stop the connection
     uv_read_stop((uv_stream_t*)ctx->con->tcp);
 
-    __active_ctx = ctx;
+    __current_ctx = ctx;
 
     // execute the concurr callback
     if (ctx->handle == -1) {
@@ -766,9 +845,16 @@ int on_inc_body(__AP_DATA_CB) {
         return 1;
     }
 
-    if (!ctx->body) {
-        // Should never happen tho
-        return 1;
+    if (http_body_is_final(p)) {
+        ctx->flag.body_done = 1;
+    }
+
+    if (ctx->body) {
+        evbuffer_add(ctx->body, at, len);
+    }
+
+    if (ch_good(ctx->read_ch)) {
+        ch_send(ctx->read_ch, NULL);
     }
 
     return 0;

@@ -14,10 +14,10 @@
 #include <stdio.h>
 #include "../appster.h"
 
-int exec_route(void* data) {
+int exec_write(void* data) {
     char binary[] = {'W', 'o', 'r', 'l', 'd', '\n'};
 
-    as_write("Hello ", -1); // pass it -1 to use strlen() to calculate len
+    as_write("Hello ", -1); // pass -1 to use strlen() to calculate len
     as_write(binary, 6); // send binary data
     as_write_f("This is an example of sending %s output\n", "formatted");
     as_write_file("../example.txt", 0, -1);
@@ -34,10 +34,12 @@ int main() {
 
     appster_t* a = as_alloc(1);
 
-    as_add_route(a, "/", exec_route, schema, NULL);
+    as_add_route(a, "/write", exec_write, schema, NULL);
 
-    as_bind(a, "0.0.0.0", 8080, 2048);
-    as_loop(a); // after this point, 'a' should not be tampered with!
+    as_listen_and_serve(a, "0.0.0.0", 8080, 2048);
     as_free(a);
     return 0;
 }
+
+// To execute the example, run the following into terminal window:
+// curl http://127.0.0.1:8080/write?hello=world
