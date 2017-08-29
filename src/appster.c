@@ -33,6 +33,7 @@ typedef struct context_s {
         uint32_t parsed_field:1;
         uint32_t should_keepalive:1;
         uint32_t body_done:1;
+        uint32_t connection_closed:1;
     } flag;
 #define appster con->tcp->loop->data
 } context_t;
@@ -90,8 +91,8 @@ static int on_inc_header_field(__AP_DATA_CB);
 static int on_inc_header_value(__AP_DATA_CB);
 static int on_inc_headers_complete(__AP_EVENT_CB);
 static int on_inc_body(__AP_DATA_CB);
-static int on_inc_message_complete(__AP_EVENT_CB);
 static int complete_header(__AP_EVENT_CB);
+static int parse_arguments(context_t* ctx);
 /* Casts and getters */
 static context_t* parser_get_context(http_parser_t* p);
 /* Redis funcs */
@@ -109,7 +110,7 @@ static http_parser_settings incoming = {
     on_inc_header_value,
     on_inc_headers_complete,
     on_inc_body,
-    on_inc_message_complete,
+    NULL,           // on_message_complete
     NULL,           // on_chunk
     NULL,           // on_chunk_complete
 };
@@ -343,14 +344,13 @@ int as_write_file(const char* path, int64_t offset, int64_t len) {
     return -1;
 }
 int64_t as_read(char* where, int64_t max) {
-    // TODO handle connection close
     context_t* ctx = __current_ctx;
     int rc = 0, tp;
 
     lassert(ctx);
-    if (!ctx->body) // no body!!!
+    if (!ctx->body) { // no body!!!
         return 0;
-
+    }
 
     // check if the bytes are here or read what we can if body is done
     if (evbuffer_get_length(ctx->body) >= max || ctx->flag.body_done) {
@@ -365,18 +365,19 @@ int64_t as_read(char* where, int64_t max) {
     while (evbuffer_get_length(ctx->body) < max && !ctx->flag.body_done) {
         ch_pass(ctx->read_ch); // wait for a signal
 
-        // read the data right away to avoid the buffering
-        tp = evbuffer_remove(ctx->body, where, max);
-        max -= tp;
-        rc += tp;
+        if (!ctx->flag.connection_closed) {
+            // read the data right away to avoid the buffering
+            tp = evbuffer_remove(ctx->body, where + rc, max);
+            max -= tp;
+            rc += tp;
+        } else {
+            break; // break if the connection closed
+        }
 
         // if the entire body has been read, stop reading
     }
 
     ch_close(ctx->read_ch); // close the signal handler
-
-    // stop reading the connection
-    uv_read_stop((uv_stream_t*)ctx->con->tcp);
 
     __current_ctx = ctx;
 
@@ -386,6 +387,14 @@ check_and_free:
             evbuffer_free(ctx->body);
             ctx->body = NULL;
         }
+    }
+
+    // stop reading the connection if not closed
+    if (!ctx->flag.connection_closed) {
+        uv_read_stop((uv_stream_t*)ctx->con->tcp);
+    } else {
+        // otherwise signal connection closure
+        return -1;
     }
 
     return rc;
@@ -507,20 +516,27 @@ void execute_context() {
     a = ctx->appster;
 
     if (ctx->flag.parse_error) {
-        error_cb_t* cb = hm_get(a->error_cbs, sh_get_path(ctx->sh));
+        error_cb_t* cb = NULL;
 
-        if (cb && cb->cb) {
-            status = cb->cb(cb->user_data);
-        } else {
-            status = a->general_error_cb->cb(a->general_error_cb->user_data);
+        if (ctx->sh) { // it may be that no shema is set
+            cb = hm_get(a->error_cbs, sh_get_path(ctx->sh));
         }
+
+        if (!cb || !cb->cb) { // assign default error cb
+            cb = a->general_error_cb;
+        }
+
+        cb->cb(cb->user_data);
+
+        DLOG("Closing connection due error");
+        status = 0; // close the connection
     } else {
         status = sh_call_cb(ctx->sh);
     }
 
     __current_ctx = NULL;
 
-    if (status > 0) {
+    if (status > 0 && !ctx->flag.connection_closed) {
         send_reply(ctx, status);
     } else {
         uv_close((uv_handle_t*) ctx->con->tcp, free_connection);
@@ -621,13 +637,29 @@ void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
 }
 void read_cb (uv_stream_t* c, ssize_t nread, const uv_buf_t* buf) {
     connection_t* con = c->data;
+    context_t* ctx;
 
     if (nread < 0) {
         if (nread == UV__EOF) {
+            DLOG("Got EOF on connection, closing");
+
+            if (vector_size(con->contexts)) {
+                ctx = parser_get_context(con->parser);
+
+                if (ch_good(ctx->read_ch)) { // expecting a read
+                    ctx->flag.body_done = 1;
+                    ctx->flag.connection_closed = 1;
+                    ch_send(ctx->read_ch, NULL);
+
+                    return; // close the connection after callback is finished
+                }
+            }
+
             uv_close((uv_handle_t*) c, free_connection);
         }
     } else if (nread > 0) {
         if (nread != http_parser_execute(con->parser, &incoming, buf->base, buf->len)) {
+            DLOG("Closing connection due http error");
             uv_close((uv_handle_t*) c, free_connection);
         }
     }
@@ -650,7 +682,6 @@ void write_cb(uv_write_t* req, int status) {
 
         uv_write(ctx->write, ctx->con->tcp, &buffer, 1, write_cb);
     } else {
-        // TODO what if the reply has been sent and the server receives body?
         if (!ctx->flag.should_keepalive) {
             uv_close((uv_handle_t*) req->handle, free_connection);
         } else {
@@ -738,42 +769,15 @@ int on_inc_header_field(__AP_DATA_CB) {
     __AP_PREAMPLE;
 
     if (!ctx->flag.parsed_arguments) { // parse the uri arguments
-        char buf[8192], * it,* s;
-        int nread;
-
-        if (evbuffer_get_length(ctx->body) >= 8192) {
-            // this is a protocol error so close the connection
-            return 1;
+        if (parse_arguments(ctx)) {
+            return 0;
         }
-
-        nread = evbuffer_remove(ctx->body, buf, 8192);
-        lassert(nread >= 0);
-
-        buf[nread] = 0;
-
-        it = strtok_r(buf, "?", &s); // path
-        ctx->sh = hm_get(a->routes, it);
-
-        if (!ctx->sh) {
-            ELOG("Missing schema for %s", it);
-            return on_parse_error(ctx);
-        }
-
-        it = strtok_r(NULL, "", &s); // args
-
-        ctx->vars = sh_parse(ctx->sh, it);
-        if (!ctx->vars) {
-            ELOG("Failed to parse args");
-            return on_parse_error(ctx);
-        }
-
-        ctx->flag.parsed_arguments = 1;
     }
 
     if (ctx->flag.parsed_field) {
         if (complete_header(p))  {
             // this is a protocol error so close the connection
-            return 1;
+            return -1;
         }
         ctx->flag.parsed_field = 0; // start parsing new field
     }
@@ -789,7 +793,7 @@ int on_inc_header_value(__AP_DATA_CB) {
 
         if (!evbuffer_get_length(ctx->body)) {
             // this is a protocol error so close the connection
-            return 1;
+            return -1;
         }
 
         ctx->flag.parsed_field = 1; // signal that the field has been parsed
@@ -809,19 +813,31 @@ int on_inc_headers_complete(__AP_EVENT_CB) {
 
     ctx = parser_get_context(p);
 
-    if (complete_header(p))  {
-        // this is a protocol error so close the connection
-        return 1;
-    }
+    if (!ctx->flag.parse_error) {
+        if (!ctx->flag.parsed_arguments) {
+            // if the parsing fails pass the connection on error,
+            // we want to handle the argument errors in the callback
+            parse_arguments(ctx);
+        }
 
-    if (http_body_is_final(p)) {
-        evbuffer_free(ctx->body);
-        ctx->body = NULL;
-        ctx->flag.body_done = 1;
-    }
+        // check again if there was no parsing error
+        if (!ctx->flag.parse_error) {
+            if (complete_header(p))  {
+                // this is a protocol error so close the connection
+                DLOG("Protocol error, closing connection");
+                return -1;
+            }
 
-    if (http_should_keep_alive(p) && !ctx->flag.parse_error) {
-        ctx->flag.should_keepalive = 1;
+            if (http_body_is_final(p)) {
+                evbuffer_free(ctx->body);
+                ctx->body = NULL;
+                ctx->flag.body_done = 1;
+            }
+
+            if (http_should_keep_alive(p)) {
+                ctx->flag.should_keepalive = 1;
+            }
+        }
     }
 
     // stop the connection
@@ -833,6 +849,7 @@ int on_inc_headers_complete(__AP_EVENT_CB) {
     if (ctx->handle == -1) {
         ctx->handle = go(execute_context());
     }
+
     return 0;
 }
 int on_inc_body(__AP_DATA_CB) {
@@ -841,8 +858,7 @@ int on_inc_body(__AP_DATA_CB) {
     ctx = parser_get_context(p);
 
     if (ctx->flag.parse_error) {
-        // drop the download
-        return 1;
+        return 0;
     }
 
     if (http_body_is_final(p)) {
@@ -859,10 +875,6 @@ int on_inc_body(__AP_DATA_CB) {
 
     return 0;
 }
-int on_inc_message_complete(__AP_EVENT_CB) {
-
-    return 0;
-}
 int complete_header(__AP_EVENT_CB) {
     char* value;
     int len;
@@ -872,7 +884,7 @@ int complete_header(__AP_EVENT_CB) {
 
     if (!evbuffer_get_length(ctx->body)) {
         // this is a protocol error so close the connection
-        return 1;
+        return -1;
     }
 
     len = evbuffer_get_length(ctx->body) + 1;
@@ -881,14 +893,55 @@ int complete_header(__AP_EVENT_CB) {
     evbuffer_remove(ctx->body, value, len);
     value[len - 1] = 0;
 
-    to_lower(ctx->str);
-    prev = hm_put(ctx->headers, ctx->str, value);
-    if (prev) {
-        free(prev);
-        free(ctx->str);
+    if (ctx->str) { // Check if client sent no headers at all
+        to_lower(ctx->str);
+        prev = hm_put(ctx->headers, ctx->str, value);
+        if (prev) {
+            free(prev);
+            free(ctx->str);
+        }
+        ctx->str = NULL;
     }
-    ctx->str = NULL;
 
+    return 0;
+}
+int parse_arguments(context_t* ctx) {
+    char buf[8192], * it,* s;
+    int nread;
+    appster_t* a;
+
+    a = ctx->appster;
+
+    if (evbuffer_get_length(ctx->body) >= 8192) {
+        // this is a protocol error so close the connection
+        ctx->flag.parse_error = 1;
+        return -1;
+    }
+
+    nread = evbuffer_remove(ctx->body, buf, 8192);
+    lassert(nread >= 0);
+
+    buf[nread] = 0;
+
+    it = strtok_r(buf, "?", &s); // path
+    ctx->sh = hm_get(a->routes, it);
+
+    if (!ctx->sh) {
+        ELOG("Missing schema for %s", it);
+        on_parse_error(ctx);
+        return -1;
+    }
+
+    it = strtok_r(NULL, "", &s); // args
+
+    ctx->vars = sh_parse(ctx->sh, it);
+    if (!ctx->vars) {
+        ELOG("Failed to parse args");
+        on_parse_error(ctx);
+        return -1;
+    }
+
+    ctx->flag.parsed_arguments = 1;
     return 0;
 }
 context_t* parser_get_context(http_parser_t* p) {
