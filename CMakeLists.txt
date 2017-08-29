@@ -1,4 +1,4 @@
-project(Appster)
+project(appster)
 cmake_minimum_required(VERSION 2.8)
 
 ##
@@ -14,7 +14,14 @@ set(SRC_LIST
     src/schema.c
 )
 
-add_library(${PROJECT_NAME} ${SRC_LIST})
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
+
+add_library(object_${PROJECT_NAME} OBJECT ${SRC_LIST})
+
+set_property(TARGET object_${PROJECT_NAME} PROPERTY POSITION_INDEPENDENT_CODE 1)
+
+add_library(shared_${PROJECT_NAME} SHARED $<TARGET_OBJECTS:object_${PROJECT_NAME}>)
+add_library(static_${PROJECT_NAME} STATIC $<TARGET_OBJECTS:object_${PROJECT_NAME}>)
 
 ##
 # Dependencies
@@ -24,7 +31,10 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 add_subdirectory(deps)
 include_directories(SYSTEM deps)
-target_link_libraries(${PROJECT_NAME}
+target_link_libraries(static_${PROJECT_NAME}
+    deps
+)
+target_link_libraries(shared_${PROJECT_NAME}
     deps
 )
 
@@ -38,7 +48,13 @@ include_directories(
     ${LIBUV_INCLUDE_DIRS}
 )
 
-target_link_libraries(${PROJECT_NAME}
+target_link_libraries(static_${PROJECT_NAME}
+    ${HIREDIS_LIBRARIES}
+    ${LIBDILL_LIBRARIES}
+    ${LIBUV_LIBRARIES}
+)
+
+target_link_libraries(shared_${PROJECT_NAME}
     ${HIREDIS_LIBRARIES}
     ${LIBDILL_LIBRARIES}
     ${LIBUV_LIBRARIES}
@@ -72,6 +88,16 @@ add_executable(example_read src/examples/read.c)
 add_executable(example_write src/examples/write.c)
 add_executable(example_redis src/examples/redis.c)
 
-target_link_libraries(example_read ${PROJECT_NAME} deps)
-target_link_libraries(example_write ${PROJECT_NAME} deps)
-target_link_libraries(example_redis ${PROJECT_NAME} deps)
+target_link_libraries(example_read static_${PROJECT_NAME} deps)
+target_link_libraries(example_write static_${PROJECT_NAME} deps)
+target_link_libraries(example_redis static_${PROJECT_NAME} deps)
+
+##
+# Installation
+##
+set (LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/lib")
+set (INCLUDE_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/include")
+
+install(TARGETS shared_${PROJECT_NAME} DESTINATION "${LIB_INSTALL_DIR}")
+install(TARGETS static_${PROJECT_NAME} DESTINATION "${LIB_INSTALL_DIR}")
+install(FILES src/appster.h DESTINATION ${INCLUDE_INSTALL_DIR})
