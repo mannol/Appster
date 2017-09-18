@@ -9,10 +9,10 @@ Basic features:
 - Scalable (You can say that for every http server...)
 - Can use all processor cores without locking overhead
 - Supports modules. Currently, built in modules are:
- - redis
- - postgresql (TODO)
- - HTTP client (TODO)
- - XMPP client (TODO)
+  - redis
+  - postgresql (TODO)
+  - HTTP client (TODO)
+  - XMPP client (TODO)
 
 ## Example
 
