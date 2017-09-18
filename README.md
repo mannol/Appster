@@ -6,16 +6,21 @@ Basic features:
 - Tiny
 - Utilizes [structured concurrency](http://libdill.org/structured-concurrency.html)
 - Full http 1.0 and 1.1 support.
-- Integrates with standard web app services like __redis__ and __postgresql__(TODO)
 - Scalable (You can say that for every http server...)
 - Can use all processor cores without locking overhead
+- Supports modules. Currently, built in modules are:
+ - redis
+ - postgresql (TODO)
+ - HTTP client (TODO)
+ - XMPP client (TODO)
 
 ## Example
 
 This is an example of a small applet that receives HTTP request on path `/` along with a single string argument and preforms 2 __asynchronous__ redis operations:
 
 ```C
-#include <appster.h>
+#include <appster/appster.h>
+#include <appster/module/redis.h>
 
 int exec_route(void* data) {
     redis_reply_t rp;
@@ -24,16 +29,16 @@ int exec_route(void* data) {
     rp = as_redis("SET hello %s", as_arg_string(0));
 
     /* Destroy the object */
-    as_free_redis_reply(&rp);
+    as_redis_free(&rp);
 
     /* Now get the stored value */
     rp = as_redis("GET hello");
 
-    /* Prints out hello world */
+    /* Prints out 'hello world' */
     printf("hello %.*s\n", rp.len, rp.str);
 
     /* Destroy the object */
-    as_free_redis_reply(&rp);
+    as_redis_free(&rp);
 
     /* Return code is taken as a status code http reply */
     return 200;
@@ -53,12 +58,13 @@ int main() {
        by libdill coroutines.
      */
     appster_t* a = as_alloc(1);
+    as_module_init(a, as_redis_module_init);
 
     /* Add route to handle HTTP requests with. */
     as_add_route(a, "/", exec_route, schema, NULL);
 
-    /* Add redis shards */
-    as_add_redis(a, "127.0.0.1", 6379);
+    /* Add redis remotes */
+    as_add_redis("127.0.0.1", 6379);
 
     /* Start working! */
     as_listen_and_serve(a, "0.0.0.0", 8080, 2048);
@@ -119,17 +125,16 @@ $ sudo make install
 ```
 
 #### Appster
-Installs the latest master:
 ```bash
-$ git clone https://github.com/mannol/Appster.git
-$ cd Appster/
-$ mkdir build
-$ cd build/
+$ wget https://github.com/mannol/Appster/archive/v0.2.tar.gz
+$ tar xf v0.2.tar.gz
+$ cd Appster-0.2/
+$ mkdir -p build && cd build/
 $ cmake ..
 $ make
-$ make install
+$ sudo make install
 ```
 
 Now, to link with appster, either use `-lshared_appster` or `-lstatic_appster` for __shared__ or __static__ linking.
 
-Current version: __0.1__. License: check `LICENSE` file
+Current version: __0.2__. License: check `LICENSE` file

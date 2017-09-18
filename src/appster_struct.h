@@ -11,9 +11,7 @@ struct appster_s {
     hashmap_t* error_cbs;
     vector_t loops;
     struct error_cb_s* general_error_cb;
-#ifndef DISABLE_REDIS
-    vector_t redises;
-#endif
+    vector_t modules;
 };
 
 #endif

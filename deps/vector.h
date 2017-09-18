@@ -28,6 +28,7 @@ typedef struct Vector {
 } Vector;
 
 typedef Vector vector_t [1];
+typedef Vector* vector_ptr_t;
 
 typedef struct Iterator {
 	void* pointer;

@@ -4,7 +4,6 @@
 #include "log.h"
 #include "evbuffer.h"
 #include "schema.h"
-#include "channel.h"
 #include "http_parser.h"
 
 #include <stdlib.h>
@@ -24,16 +23,16 @@ typedef struct context_s {
     evbuffer_t* body,* send_body;
     value_t** vars;
     schema_t* sh;
-    channel_t read_ch;
+    appster_channel_t read_ch;
     int handle;
     char* str;
     struct {
-        uint32_t parse_error:1;
-        uint32_t parsed_arguments:1;
-        uint32_t parsed_field:1;
-        uint32_t should_keepalive:1;
-        uint32_t body_done:1;
-        uint32_t connection_closed:1;
+        unsigned parse_error:1;
+        unsigned parsed_arguments:1;
+        unsigned parsed_field:1;
+        unsigned should_keepalive:1;
+        unsigned body_done:1;
+        unsigned connection_closed:1;
     } flag;
 #define appster con->tcp->loop->data
 } context_t;
@@ -76,7 +75,7 @@ static int add_header(const void* key, void* value, void* context);
 coroutine void execute_context();
 /* Connection and messages */
 static void bind_listener(uv_loop_t* loop, const addr_t* ad, int backlog);
-static void run_loop(void* loop);
+static void run_loop(void* lv);
 static void on_new_connection(uv_stream_t *tcp, int status);
 static void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf);
 static void read_cb(uv_stream_t* c, ssize_t nread, const uv_buf_t* buf);
@@ -95,12 +94,6 @@ static int complete_header(__AP_EVENT_CB);
 static int parse_arguments(context_t* ctx);
 /* Casts and getters */
 static context_t* parser_get_context(http_parser_t* p);
-/* Redis funcs */
-#ifndef DISABLE_REDIS
-void redis_remote_initialize_for_this_thread(uv_loop_t* loop);
-void redis_remote_cleanup_for_this_thread();
-void free_redis_remote(void* value);
-#endif
 
 static http_parser_settings incoming = {
     on_message_begin,
@@ -136,7 +129,7 @@ appster_t* as_alloc(unsigned threads) {
         vector_push_back(rc->loops, &loop);
     }
 
-    vector_setup(rc->redises, 10, sizeof(void*));
+    vector_setup(rc->modules, 10, sizeof(void*));
     rc->general_error_cb = malloc((sizeof(error_cb_t)));
     rc->general_error_cb->cb = basic_error;
     rc->general_error_cb->user_data = NULL;
@@ -157,13 +150,18 @@ void as_free(appster_t* a) {
         free(ITERATOR_GET_AS(uv_loop_t*, &loop));
     }
 
-#ifndef DISABLE_REDIS
-    VECTOR_FOR_EACH(a->redises, redis) {
-        free_redis_remote(ITERATOR_GET_AS(void*, &redis));
+    VECTOR_FOR_EACH(a->modules, module) {
+        appster_module_t* m;
+
+        m = ITERATOR_GET_AS(appster_module_t*, &module);
+        if (m->free_cb) {
+            m->free_cb();
+        }
+        free(m);
     }
-#endif
 
     vector_destroy(a->loops);
+    vector_destroy(a->modules);
     hm_foreach(a->routes, hm_cb_sh_free, NULL);
     hm_free(a->routes);
     hm_foreach(a->error_cbs, hm_cb_free, (void*) 1);
@@ -358,12 +356,12 @@ int64_t as_read(char* where, int64_t max) {
         goto check_and_free;
     }
 
-    ctx->read_ch = ch_make();
+    ctx->read_ch = as_channel_alloc();
 
     uv_read_start((uv_stream_t*)ctx->con->tcp, alloc_cb, read_cb);
 
     while (evbuffer_get_length(ctx->body) < max && !ctx->flag.body_done) {
-        ch_pass(ctx->read_ch); // wait for a signal
+        as_channel_pass(ctx->read_ch); // wait for a signal
 
         if (!ctx->flag.connection_closed) {
             // read the data right away to avoid the buffering
@@ -377,7 +375,7 @@ int64_t as_read(char* where, int64_t max) {
         // if the entire body has been read, stop reading
     }
 
-    ch_close(ctx->read_ch); // close the signal handler
+    as_channel_free(ctx->read_ch); // close the signal handler
 
     __current_ctx = ctx;
 
@@ -436,6 +434,74 @@ int64_t as_read_to_file(const char* path, int64_t max) {
     rc = as_read_to_fd(fd, max);
     close(fd);
     return rc;
+}
+int as_module_init(appster_t* a, as_module_init_cb_t cb) {
+    appster_module_t* module;
+
+    lassert(cb);
+
+    module = calloc(1, sizeof(appster_module_t));
+    if (cb(module) != 0) {
+        free(module);
+        return -1;
+    }
+
+    vector_push_back(a->modules, &module);
+    return 0;
+}
+appster_channel_t as_channel_alloc() {
+    appster_channel_t ch;
+    ch.id = chmake(sizeof(void*));
+    if(ch.id == -1) {
+        perror("Cannot create channel");
+        exit(1);
+    }
+    return ch;
+}
+void as_channel_free(appster_channel_t ch) {
+    hclose(ch.id);
+}
+appster_channel_t as_channel_from_ptr(void* ptr) {
+    appster_channel_t ch;
+    ch.ptr = (uintptr_t) ptr;
+    return ch;
+}
+appster_channel_t as_channel_from_int(int i) {
+    appster_channel_t ch;
+    ch.id = i;
+    return ch;
+}
+void as_channel_send(appster_channel_t ch, void* what) {
+    if(chsend(ch.id, &what, sizeof(void*), -1) != 0) {
+        perror("Cannot send a message");
+        exit(1);
+    }
+    yield();
+}
+void* as_channel_recv(appster_channel_t ch) {
+    void* rc;
+    struct context_s* ctx = __current_ctx;
+
+    if(chrecv(ch.id, &rc, sizeof(void*), -1) != 0) {
+        perror("Cannot receive message");
+        exit(1);
+    }
+
+    __current_ctx = ctx;
+
+    as_channel_free(ch);
+    return rc;
+}
+void* as_channel_pass(appster_channel_t ch) {
+    void* rc;
+    if(chrecv(ch.id, &rc, sizeof(void*), -1) != 0) {
+        perror("Cannot receive message");
+        exit(1);
+    }
+    return rc;
+}
+int as_channel_good(appster_channel_t ch) {
+    return ch.id != -1;
 }
 
 void to_lower(char* str) {
@@ -573,14 +639,24 @@ void bind_listener(uv_loop_t* loop, const addr_t* ad, int backlog) {
         FLOG("Tcp listen failed %s", uv_strerror(err));
     }
 }
-void run_loop(void* loop) {
+void run_loop(void* lv) {
+    appster_t* a;
+    uv_loop_t* loop;
     int err;
 
-    DLOG("Running event loop");
+    loop = lv;
+    a = loop->data;
 
-#ifndef DISABLE_REDIS
-    redis_remote_initialize_for_this_thread(loop);
-#endif
+    VECTOR_FOR_EACH(a->modules, module) {
+        appster_module_t* m;
+
+        m = ITERATOR_GET_AS(appster_module_t*, &module);
+        if (m->init_loop_cb) {
+            m->init_loop_cb(loop);
+        }
+    }
+
+    DLOG("Running event loop");
 
     err = uv_run(loop, UV_RUN_DEFAULT);
     if (err != 0) {
@@ -589,9 +665,14 @@ void run_loop(void* loop) {
         ELOG("Run complete");
     }
 
-#ifndef DISABLE_REDIS
-    redis_remote_cleanup_for_this_thread();
-#endif
+    VECTOR_FOR_EACH(a->modules, module) {
+        appster_module_t* m;
+
+        m = ITERATOR_GET_AS(appster_module_t*, &module);
+        if (m->free_loop_cb) {
+            m->free_loop_cb(loop);
+        }
+    }
 }
 void on_new_connection(uv_stream_t *tcp, int status) {
     int err;
@@ -646,10 +727,10 @@ void read_cb (uv_stream_t* c, ssize_t nread, const uv_buf_t* buf) {
             if (vector_size(con->contexts)) {
                 ctx = parser_get_context(con->parser);
 
-                if (ch_good(ctx->read_ch)) { // expecting a read
+                if (as_channel_good(ctx->read_ch)) { // expecting a read
                     ctx->flag.body_done = 1;
                     ctx->flag.connection_closed = 1;
-                    ch_send(ctx->read_ch, NULL);
+                    as_channel_send(ctx->read_ch, NULL);
 
                     return; // close the connection after callback is finished
                 }
@@ -869,8 +950,8 @@ int on_inc_body(__AP_DATA_CB) {
         evbuffer_add(ctx->body, at, len);
     }
 
-    if (ch_good(ctx->read_ch)) {
-        ch_send(ctx->read_ch, NULL);
+    if (as_channel_good(ctx->read_ch)) {
+        as_channel_send(ctx->read_ch, NULL);
     }
 
     return 0;
