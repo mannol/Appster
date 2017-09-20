@@ -10,7 +10,7 @@ Basic features:
 - Can use all processor cores without locking overhead
 - Supports modules. Currently, built in modules are:
   - redis
-  - postgresql (TODO)
+  - postgresql
   - HTTP client (TODO)
   - XMPP client (TODO)
 
@@ -109,7 +109,7 @@ $ make check
 $ make install
 ```
 
-#### libhiredis (optional)
+#### libhiredis (optional _but_ required for redis support)
 You can grab libhiredis from your distribution packages:
 ```bash
 $ sudo apt install libhiredis-dev
@@ -124,11 +124,19 @@ $ make
 $ sudo make install
 ```
 
+#### libpq (optional _but_ required for sql support)
+You can grab libpq from your distribution packages:
+(On ubuntu, there might be some additional packages required for cmake
+being able to find libpq)
+```bash
+$ sudo apt install libpq-dev
+```
+
 #### Appster
 ```bash
-$ wget https://github.com/mannol/Appster/archive/v0.2.tar.gz
-$ tar xf v0.2.tar.gz
-$ cd Appster-0.2/
+$ wget https://github.com/mannol/Appster/archive/v0.3.tar.gz
+$ tar xf v0.3.tar.gz
+$ cd Appster-0.3/
 $ mkdir -p build && cd build/
 $ cmake ..
 $ make
@@ -137,4 +145,4 @@ $ sudo make install
 
 Now, to link with appster, either use `-lshared_appster` or `-lstatic_appster` for __shared__ or __static__ linking.
 
-Current version: __0.2__. License: check `LICENSE` file
+Current version: __0.3__. License: check `LICENSE` file

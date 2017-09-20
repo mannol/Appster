@@ -13,11 +13,13 @@ add_subdirectory(deps)
 include_directories(SYSTEM deps)
 
 find_package(Hiredis)
+find_package(PostgreSQL)
 find_package(libdill REQUIRED)
 find_package(LibUV REQUIRED)
 
 include_directories(
     ${HIREDIS_INCLUDE_DIR}
+    ${PostgreSQL_INCLUDE_DIRS}
     ${LIBDILL_INCLUDE_DIRS}
     ${LIBUV_INCLUDE_DIRS}
 )
@@ -41,6 +43,10 @@ if(HIREDIS_FOUND)
     set(SRC_LIST ${SRC_LIST} src/module/redis.c)
 endif()
 
+if(PostgreSQL_FOUND)
+    set(SRC_LIST ${SRC_LIST} src/module/sql.c)
+endif()
+
 ##
 # Link
 ##
@@ -61,12 +67,14 @@ target_link_libraries(shared_${PROJECT_NAME}
 
 target_link_libraries(static_${PROJECT_NAME}
     ${HIREDIS_LIBRARIES}
+    ${PostgreSQL_LIBRARIES}
     ${LIBDILL_LIBRARIES}
     ${LIBUV_LIBRARIES}
 )
 
 target_link_libraries(shared_${PROJECT_NAME}
     ${HIREDIS_LIBRARIES}
+    ${PostgreSQL_LIBRARIES}
     ${LIBDILL_LIBRARIES}
     ${LIBUV_LIBRARIES}
 )
@@ -105,6 +113,16 @@ if(HIREDIS_FOUND)
     )
 endif()
 
+if(PostgreSQL_FOUND)
+    add_executable(example_sql
+        src/examples/sql.c
+    )
+    target_link_libraries(example_sql
+        static_${PROJECT_NAME}
+        deps
+    )
+endif()
+
 ##
 # Installation
 ##
@@ -117,4 +135,8 @@ install(FILES src/appster.h DESTINATION ${INCLUDE_INSTALL_DIR})
 
 if(HIREDIS_FOUND)
     install(FILES src/module/redis.h DESTINATION "${INCLUDE_INSTALL_DIR}/module")
+endif()
+
+if(PostgreSQL_FOUND)
+    install(FILES src/module/sql.h DESTINATION "${INCLUDE_INSTALL_DIR}/module")
 endif()
