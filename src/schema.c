@@ -12,7 +12,7 @@ typedef struct string_list_s {
 
 struct value_s {
     appster_value_type_t type;
-    uint32_t len; // for strings and lists
+    uint32_t len; /* for strings and lists */
 
     union {
         int flag;
@@ -132,12 +132,12 @@ value_t** sh_parse(schema_t* sh, char* args) {
                 goto fail;
             }
 
-            free_value(rc[arg->index]); // no duplicates!
+            free_value(rc[arg->index]); /* no duplicates! */
             rc[arg->index] = value;
         }
     }
 
-    // check required items
+    /* check required items */
     if (!hm_foreach(sh->args, check_arguments, rc))
         goto fail;
 
@@ -348,7 +348,7 @@ value_t* parse_string(const char* raw) {
         return NULL;
     }
 
-    len ++; // \0
+    len ++; /* \0 */
 
     rc = malloc(sizeof(value_t) + len);
     rc->len = len;
@@ -427,7 +427,6 @@ value_t* parse_number_list(const char* raw) {
     return rc;
 }
 value_t* parse_string_list(const char* raw) {
-    // TODO verify if this works nicely
     int len, total = 0, count = 0;
     value_t* rc;
     char dec[8192];
@@ -456,7 +455,7 @@ value_t* parse_string_list(const char* raw) {
             raw += len + (raw[len] == ';' ? 1 : 0);
     } while (raw && *raw);
 
-    if (!count) { // shouldn't happen?
+    if (!count) { /* shouldn't happen? */
         return NULL;
     }
 
@@ -503,7 +502,7 @@ value_t* parse_encoded_string_list(const char* raw) {
             raw += len + (raw[len] == ';' ? 1 : 0);
     } while (raw && *raw);
 
-    if (!count) { // shouldn't happen?
+    if (!count) { /* shouldn't happen? */
         return NULL;
     }
 

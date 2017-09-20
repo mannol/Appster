@@ -1,5 +1,5 @@
-#ifndef schema_H
-#define schema_H
+#ifndef SCHEMA_H
+#define SCHEMA_H
 
 #include "appster.h"
 
@@ -33,4 +33,4 @@ double sh_arg_list_number(schema_t* sh, value_t** vals, uint32_t idx, uint32_t l
 const char* sh_arg_list_string(schema_t* sh, value_t** vals, uint32_t idx, uint32_t list_idx);
 uint32_t sh_arg_list_string_length(schema_t* sh, value_t** vals, uint32_t idx, uint32_t list_idx);
 
-#endif // schema_H
+#endif /* schema_H */

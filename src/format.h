@@ -11,4 +11,4 @@ const char* to_base64(const char* str);
 const char* to_base64_ex(const char* str, uint32_t len);
 int urldecode(const char* src, char* dst);
 
-#endif // FORMAT_H
+#endif /* FORMAT_H */

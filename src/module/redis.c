@@ -29,16 +29,16 @@ typedef struct {
 } redis_namespace_t;
 
 typedef struct {
-    uv_timer_t* timer;
+    uv_timer_t timer;
     redis_remote_t* r;
     redis_namespace_t* ns;
     uint32_t idx;
 } redis_context_data_t;
 
-__thread vector_t remotes;
-__thread redis_namespace_t global;
-__thread hashmap_t* namespaces = NULL;
-__thread uv_loop_t* loop = NULL;
+static vector_t remotes;
+static __thread redis_namespace_t global;
+static __thread hashmap_t* namespaces = NULL;
+static __thread uv_loop_t* loop = NULL;
 
 static void module_free();
 static void module_init_loop(void* l);
@@ -129,7 +129,7 @@ redis_reply_t as_redisfmt(char *cmd, size_t len) {
 
     arg.reply = &rc;
     arg.channel = as_channel_alloc();
-    as_channel_recv(arg.channel); // wait for async command to finish
+    as_channel_recv(arg.channel); /* wait for async command to finish */
 
     return rc;
 }
@@ -192,9 +192,8 @@ void module_init_loop(void* l) {
             rcd->ns = &global;
         }
 
-        rcd->timer = malloc(sizeof(uv_timer_t));
-        uv_timer_init(loop, rcd->timer);
-        rcd->timer->data = rcd;
+        uv_timer_init(loop, &rcd->timer);
+        rcd->timer.data = rcd;
         rcd->r = r;
         rcd->idx = vector_size(rcd->ns->ctxs);
         vector_push_back(rcd->ns->ctxs, &ctx);
@@ -249,7 +248,7 @@ redisAsyncContext* get_shard_fix_format(char* cmd, size_t* plen) {
         return NULL;
     }
 
-    klen = line + 2; // klen is now set to key len
+    klen = line + 2; /* klen is now set to key len */
 
     line = memchr(line + 1, '\n', len - (line - cmd) - 1);
 
@@ -257,38 +256,38 @@ redisAsyncContext* get_shard_fix_format(char* cmd, size_t* plen) {
         return NULL;
     }
 
-    // now, 'line + 1' is set at the begining of the command
+    /* now, 'line + 1' is set at the begining of the command */
     eol = memchr(line + 1, '\n', len - (line - cmd) - 1);
     if (!eol) {
         return NULL;
     }
 
     coml = eol - line - 1;
-    ns = get_namespace(line + 1, coml); // get namespace
+    ns = get_namespace(line + 1, coml); /* get namespace */
 
     if (!ns || ns == &global) {
         return get_shard_by_key(ns, NULL, 0);
     }
 
-    fx = line + 1; // set the marker at which point to do memmove
+    fx = line + 1; /* set the marker at which point to do memmove */
 
     line = memchr(eol + 1, '\n', len - (eol - cmd) - 1);
     if (!line) {
         return NULL;
     }
 
-    // now, 'line + 1' is set at the begining of the key
+    /* now, 'line + 1' is set at the begining of the key */
     eol = memchr(line + 1, '\n', len - (line - cmd) - 1);
     if (!eol) {
         return NULL;
     }
 
-    // pick up the context
+    /* pick up the context */
     ctx = get_shard_by_key(ns, line + 1, eol - line - 1);
 
     dot = strchr(fx, '.');
     fx = strchr(fx, '\n');
-    if (!dot) { // very unlikely, but it can happen with binary input mistake
+    if (!dot) { /* very unlikely, but it can happen with binary input mistake */
         return NULL;
     }
 
@@ -393,8 +392,8 @@ void redis_steal(redisReply* what, redis_reply_t* to) {
         break;
     }
 
-    if (what->type != REDIS_REPLY_ARRAY) // arrays should be freed
-        what->type = REDIS_REPLY_INTEGER; // steal it!
+    if (what->type != REDIS_REPLY_ARRAY) /* arrays should be freed */
+        what->type = REDIS_REPLY_INTEGER; /* steal it! */
 }
 void redis_connect_cb(const redisAsyncContext *ctx, int status) {
     redis_context_data_t* rcd;
@@ -404,7 +403,7 @@ void redis_connect_cb(const redisAsyncContext *ctx, int status) {
     if (status != REDIS_OK) {
         ELOG("Connection error: %s", ctx->errstr);
 
-        uv_timer_start(rcd->timer, redis_postponed_connect_cb, 500, 0);
+        uv_timer_start(&rcd->timer, redis_postponed_connect_cb, 500, 0);
         ctx = NULL;
     } else {
         DLOG("Connected on shard: %s:%d", ctx->c.tcp.host, ctx->c.tcp.port);
@@ -426,7 +425,7 @@ void redis_disconnect_cb(const redisAsyncContext *ctx, int status) {
         ctx = NULL;
 
         vector_assign(rcd->ns->ctxs, rcd->idx, &ctx);
-        uv_timer_start(rcd->timer, redis_postponed_connect_cb, 500, 0);
+        uv_timer_start(&rcd->timer, redis_postponed_connect_cb, 500, 0);
     }
 }
 void redis_postponed_connect_cb(uv_timer_t* handle) {
@@ -439,7 +438,7 @@ void redis_postponed_connect_cb(uv_timer_t* handle) {
 
     ctx = connect_to_shard(rcd->r->ip, rcd->r->port);
     if (!ctx) {
-        uv_timer_start(rcd->timer, redis_postponed_connect_cb, 500, 0);
+        uv_timer_start(&rcd->timer, redis_postponed_connect_cb, 500, 0);
         return;
     }
 
@@ -482,12 +481,12 @@ redisAsyncContext* connect_to_shard(const char* ip, uint16_t port)
     redisAsyncSetDisconnectCallback(ctx, redis_disconnect_cb);
 
     /*
-     * In the cases of which the connection could not be established on a local
-     * interface, or on a remote in case of an interface error, the adapter
-     * doesn't invoke an error callback. To deal with that, we safely reissue a
-     * connect on an fd after the attach and the error will be reported.
-     *
-     * A somewhat relevant issue: https://github.com/redis/hiredis/issues/450
+     In the cases of which the connection could not be established on a local
+     interface, or on a remote in case of an interface error, the adapter
+     doesn't invoke an error callback. To deal with that, we safely reissue a
+     connect on an fd after the attach and the error will be reported.
+
+     A somewhat relevant issue: https://github.com/redis/hiredis/issues/450
      */
     char strport[6];
     struct addrinfo *servinfo;
@@ -504,8 +503,8 @@ redisAsyncContext* connect_to_shard(const char* ip, uint16_t port)
     return ctx;
 }
 const char* strnpbrk(const char* s, const char* accept, size_t n) {
-    // Taken from: https://github.com/jwtowner/upcaste/blob/master/src/upcore/src/cstring/strnpbrk.cpp
-    // LICENSE at the time of copying: MIT
+    /* Taken from: https://github.com/jwtowner/upcaste/blob/master/src/upcore/src/cstring/strnpbrk.cpp
+     * LICENSE at the time of copying: MIT */
 
     if (!(s || !n) || !accept) {
         return NULL;

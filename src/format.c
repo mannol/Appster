@@ -32,7 +32,7 @@ uint32_t base64_decoded_len(const char *base64, uint32_t len)
     return (((len + 3) / 4) * 3) + 1;
 }
 
-// base64 encoder and decoder taken from apache project
+/* base64 encoder and decoder taken from apache project */
 uint32_t from_base64(const char *str, char* output)
 {
     int nbytesdecoded;

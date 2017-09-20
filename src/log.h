@@ -54,4 +54,4 @@ extern __thread char __log_str[65536];
         exit(1); \
     } while(0)
 
-#endif // LOG_H
+#endif /* LOG_H */

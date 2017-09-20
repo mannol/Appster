@@ -39,17 +39,18 @@ typedef union appster_channel_u
 appster_t* as_alloc(unsigned threads);
 void as_free(appster_t* a);
 
-// NOTE: once added, route cannot be romoved!
+/* NOTE: once added, route cannot be romoved! */
 int as_add_route(appster_t* a, const char* path, as_route_cb_t cb, appster_schema_entry_t* schema, void* user_data);
 int as_add_route_error(appster_t* a, const char* path, as_route_cb_t cb, void* user_data);
 
 int as_listen_and_serve(appster_t* a, const char* addr, uint16_t port, int backlog);
 
-//
-// Check to see if argument exists. Returns 1 if argument is present or 0
-// if the argument is missing.
+/*
+ Check to see if argument exists. Returns 1 if argument is present or 0
+ if the argument is missing.
+ */
 int as_arg_exists(uint32_t idx);
-// Accessors
+/* Accessors */
 int as_arg_flag(uint32_t idx);
 uint64_t as_arg_integer(uint32_t idx);
 double as_arg_number(uint32_t idx);
@@ -61,40 +62,40 @@ double as_arg_list_number(uint32_t idx, uint32_t list_idx);
 const char* as_arg_list_string(uint32_t idx, uint32_t list_idx);
 uint32_t as_arg_list_string_length(uint32_t idx, uint32_t list_idx);
 
-//
-// Sending body in reply. These functions queue the reply body. Once added data
-// is not removed until it's written to the wire. The file sending may use mmap
-// or sendfile() api's. Content-Length header is added automatically.
-//
+/*
+ Sending body in reply. These functions queue the reply body. Once added data
+ is not removed until it's written to the wire. The file sending may use mmap
+ or sendfile() api's. Content-Length header is added automatically.
+ */
 int as_write(const char* data, int64_t len);
 int as_write_f(const char* format, ...);
 int as_write_fd(int fd, int64_t offset, int64_t len);
 int as_write_file(const char* path, int64_t offset, int64_t len);
 
-//
-// Read the request body if present. Returns the amount of bytes read or -1
-// if error occured. Reads up to max amount of bytes. The functions do not
-// return until either the whole body is read, the max bytes is read or the
-// error occurs.
-//
+/*
+ Read the request body if present. Returns the amount of bytes read or -1
+ if error occured. Reads up to max amount of bytes. The functions do not
+ return until either the whole body is read, the max bytes is read or the
+ error occurs.
+ */
 int64_t as_read(char* where, int64_t max);
-//
-// Read from the wire directly to the fd,
-//
+/*
+ Read from the wire directly to the fd,
+ */
 int64_t as_read_to_fd(int fd, int64_t max);
-//
-// Read from the wire directly to the file
-//
+/*
+ Read from the wire directly to the file
+ */
 int64_t as_read_to_file(const char* path, int64_t max);
 
 
-///
-// MODULES
-///
+/*
+ MODULES
+ */
 
-//
-// Initialization and destruction
-//
+/*
+ Initialization and destruction
+ */
 typedef void (*as_module_free_cb_t) ();
 typedef void (*as_module_init_loop_cb_t) (void* loop);
 typedef void (*as_module_free_loop_cb_t) ();
@@ -108,17 +109,17 @@ typedef struct appster_module_s {
 typedef int (*as_module_init_cb_t) (appster_module_t* m);
 int as_module_init(appster_t* a, as_module_init_cb_t cb);
 
-//
-// Communication
-//
-// Create a channel handle. Never modify returned handle manually. Casting
-// should be done using as_channel_from_*() functions. Once created channel
-// should be freed. as_channel_recv() function frees the channel automatically,
-// as_channel_pass() does not. They are both used to receive data from the
-// channel. as_channel_send() is used to send data via channel.
-// as_channel_good() can be used to check if the channel WAS allocated at some
-// point; it does not check if the channel was freed!
-//
+/*
+ Communication
+
+ Create a channel handle. Never modify returned handle manually. Casting
+ should be done using as_channel_from_*() functions. Once created channel
+ should be freed. as_channel_recv() function frees the channel automatically,
+ as_channel_pass() does not. They are both used to receive data from the
+ channel. as_channel_send() is used to send data via channel.
+ as_channel_good() can be used to check if the channel WAS allocated at some
+ point; it does not check if the channel was freed!
+ */
 appster_channel_t as_channel_alloc();
 void as_channel_free(appster_channel_t ch);
 appster_channel_t as_channel_from_ptr(void* ptr);
@@ -126,7 +127,7 @@ appster_channel_t as_channel_from_int(int i);
 void as_channel_send(appster_channel_t ch, void* what);
 void* as_channel_recv(appster_channel_t ch);
 void* as_channel_pass(appster_channel_t ch);
-int as_channel_good(appster_channel_t ch); // returns non-zero if good
+int as_channel_good(appster_channel_t ch); /* returns non-zero if good */
 
 
-#endif // APPSTER_H
+#endif /* APPSTER_H */
