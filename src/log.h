@@ -30,7 +30,7 @@ extern __thread char __log_str[65536];
             break; \
         snprintf(__log_str, 65535, args); \
         __log_str[65535] = 0; \
-        __log_func("DEBUG", __FILENAME__, __LINE__, __FUNCTION__, __log_str); \
+        __log_func("DEBUG", __FILENAME__, __LINE__, __func__, __log_str); \
     } while(0)
 #define ELOG(args...) \
     do { \
@@ -38,18 +38,18 @@ extern __thread char __log_str[65536];
             break; \
         snprintf(__log_str, 65535, args); \
         __log_str[65535] = 0; \
-        __log_func("ERROR", __FILENAME__, __LINE__, __FUNCTION__, __log_str); \
+        __log_func("ERROR", __FILENAME__, __LINE__, __func__, __log_str); \
     } while(0)
 #define FLOG(args...) \
     do { \
-        fprintf (stderr, "FATAL ERROR on %s:%d IN %s()  ", __FILENAME__, \
-                    __LINE__,  __FUNCTION__); \
+        fprintf (stderr, "FATAL ERROR on %s:%d IN %s()  ", __func__, \
+                    __LINE__,  __func__); \
         fprintf (stderr, args); \
         fprintf (stderr, "\n"); \
         if (__log_enabled()) { \
             snprintf(__log_str, 65535, args); \
             __log_str[65535] = 0; \
-            __log_func("FATAL", __FILENAME__, __LINE__, __FUNCTION__, __log_str); \
+            __log_func("FATAL", __FILENAME__, __LINE__, __func__, __log_str); \
         } \
         exit(1); \
     } while(0)

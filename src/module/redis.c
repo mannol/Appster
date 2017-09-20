@@ -296,7 +296,8 @@ redisAsyncContext* get_shard_fix_format(char* cmd, size_t* plen) {
     klen[1] = '\n';
 
     coml = len - (dot - cmd) - 1;
-    fx = memmove(klen + 2, dot + 1, coml) + coml + 1;
+    fx = memmove(klen + 2, dot + 1, coml);
+    fx += coml + 1;
     *fx = 0;
 
     *plen = fx - cmd - 1;

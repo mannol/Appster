@@ -83,7 +83,7 @@ target_link_libraries(shared_${PROJECT_NAME}
 # Compiler & linker flags
 ##
 
-set(CMAKE_C_FLAGS "-Wall -Wno-sign-compare")
+set(CMAKE_C_FLAGS "-Wall -Wno-sign-compare -Wpedantic -Wno-variadic-macros")
 
 #if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O0 -fsanitize=address -fno-omit-frame-pointer -Wno-unused-function")

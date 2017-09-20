@@ -260,7 +260,7 @@ void module_init_loop(void* l) {
         conn->ctx = PQconnectStart(r);
 
         if (!conn->ctx) {
-            ELOG("Connection to DB failed, %p", conn->ctx);
+            ELOG("Connection to DB failed, %p", (void*) conn->ctx);
         failure:
             if (conn->ctx) {
                 PQfinish(conn->ctx);
