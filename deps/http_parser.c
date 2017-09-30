@@ -180,7 +180,7 @@ static const char *method_strings[] =
 
 static const char *status_strings[] =
   {
-#define XX(num, name, string) #string,
+#define XX(num, name, string) [num] = #string,
   HTTP_STATUS_MAP(XX)
 #undef XX
   };

@@ -20,7 +20,7 @@ int exec_write(void* data) {
     as_write("Hello ", -1); /* pass -1 to use strlen() to calculate len */
     as_write(binary, 6); /* send binary data */
     as_write_f("This is an example of sending %s output\n", "formatted");
-    as_write_file("../example.txt", 0, -1);
+    as_write_file("../../example.txt", 0, -1);
     as_write("Files are not loaded into memory while sending!!!\n", -1);
 
     return 200;

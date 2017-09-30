@@ -19,7 +19,7 @@
 #include "../log.h"
 
 int exec_read(void* data) {
-    char buf[256];
+    char buf[256] = {0};
     int rc;
 
     rc = as_read(buf, 2);

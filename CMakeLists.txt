@@ -1,7 +1,15 @@
 project(appster)
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.0.2)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
+
+##
+# Options
+##
+
+option(BUILD_REDIS "enables or disables redis module" ON)
+option(BUILD_SQL "enables or disables sql module" ON)
+option(BUILD_SSL "enables or disables tls/ssl extenstion" ON)
 
 ##
 # Dependencies
@@ -14,6 +22,7 @@ include_directories(SYSTEM deps)
 
 find_package(Hiredis)
 find_package(PostgreSQL)
+find_package(OpenSSL)
 find_package(libdill REQUIRED)
 find_package(LibUV REQUIRED)
 
@@ -22,10 +31,15 @@ include_directories(
     ${PostgreSQL_INCLUDE_DIRS}
     ${LIBDILL_INCLUDE_DIRS}
     ${LIBUV_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIR}
 )
 
 if(HIREDIS_FOUND)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${HIREDIS_DEFINITIONS}")
+endif()
+
+if (OPENSSL_FOUND)
+    add_definitions(-DHAS_CRYPTO)
 endif()
 
 ##
@@ -38,6 +52,10 @@ set(SRC_LIST
     src/log.c
     src/schema.c
 )
+
+if (OPENSSL_FOUND)
+    set(SRC_LIST ${SRC_LIST} src/crypto.c)
+endif()
 
 if(HIREDIS_FOUND)
     set(SRC_LIST ${SRC_LIST} src/module/redis.c)
@@ -70,6 +88,7 @@ target_link_libraries(static_${PROJECT_NAME}
     ${PostgreSQL_LIBRARIES}
     ${LIBDILL_LIBRARIES}
     ${LIBUV_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
 )
 
 target_link_libraries(shared_${PROJECT_NAME}
@@ -77,21 +96,22 @@ target_link_libraries(shared_${PROJECT_NAME}
     ${PostgreSQL_LIBRARIES}
     ${LIBDILL_LIBRARIES}
     ${LIBUV_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
 )
 
 ##
 # Compiler & linker flags
 ##
 
-set(CMAKE_C_FLAGS "-Wall -Wno-sign-compare -Wpedantic -Wno-variadic-macros")
+set(CMAKE_C_FLAGS "-Wall -Wpedantic -Wno-sign-compare -Wno-variadic-macros")
 
-#if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O0 -fsanitize=address -fno-omit-frame-pointer -Wno-unused-function")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address -static-libasan")
 #    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O0")
-#else()
-#    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2")
-#endif()
+else()
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2")
+endif()
 
 ##
 # Examples

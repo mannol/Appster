@@ -34,13 +34,14 @@ typedef struct context_s {
         unsigned body_done:1;
         unsigned connection_closed:1;
     } flag;
-#define appster con->tcp->loop->data
+#define appster con->handle.loop->data
 } context_t;
 
 typedef struct connection_s {
     http_parser_t parser[1];
     vector_t contexts;
-    uv_stream_t* tcp;
+    uv_poll_t handle;
+    int fd;
 } connection_t;
 
 typedef union addr_u {
@@ -76,10 +77,10 @@ coroutine void execute_context();
 /* Connection and messages */
 static void bind_listener(uv_loop_t* loop, const addr_t* ad, int backlog);
 static void run_loop(void* lv);
-static void on_new_connection(uv_stream_t *tcp, int status);
-static void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf);
-static void read_cb(uv_stream_t* c, ssize_t nread, const uv_buf_t* buf);
-static void write_cb(uv_write_t* req, int status);
+static void accept_poll(uv_poll_t* handle, int status, int events);
+static void error_poll(uv_poll_t* handle);
+static void read_poll(uv_poll_t* handle, int status, int events);
+static void write_poll(uv_poll_t* handle, int status, int events);
 static void free_context(context_t* ctx);
 static void free_connection(uv_handle_t* handle);
 /* Incoming message parsing functions */
@@ -356,7 +357,7 @@ int64_t as_read(char* where, int64_t max) {
 
     ctx->read_ch = as_channel_alloc();
 
-    uv_read_start((uv_stream_t*)ctx->con->tcp, alloc_cb, read_cb);
+    uv_poll_start(&ctx->con->handle, UV_READABLE, read_poll);
 
     while (evbuffer_get_length(ctx->body) < max && !ctx->flag.body_done) {
         as_channel_pass(ctx->read_ch); /* wait for a signal */
@@ -387,7 +388,7 @@ check_and_free:
 
     /* stop reading the connection if not closed */
     if (!ctx->flag.connection_closed) {
-        uv_read_stop((uv_stream_t*)ctx->con->tcp);
+        uv_poll_stop(&ctx->con->handle);
     } else {
         /* otherwise signal connection closure */
         return -1;
@@ -522,7 +523,6 @@ int basic_error(void* data) {
 }
 void send_reply(context_t* ctx, int status) {
     evbuffer_t* buf;
-    int len;
 
     buf = evbuffer_new();
 
@@ -550,19 +550,10 @@ void send_reply(context_t* ctx, int status) {
         evbuffer_free(ctx->send_body);
     }
 
-    ctx->write = malloc(sizeof(uv_write_t));
-    ctx->write->data = ctx;
     ctx->send_body = buf;
 
-    len = MIN(65536, evbuffer_get_length(buf));
-
-    ctx->str = malloc(len);
-    uv_buf_t buffer = {
-        ctx->str,
-        evbuffer_remove(buf, ctx->str, len)
-    };
-
-    uv_write(ctx->write, ctx->con->tcp, &buffer, 1, write_cb);
+    evbuffer_write(buf, ctx->con->fd);
+    uv_poll_start(&ctx->con->handle, UV_WRITABLE, write_poll);
 }
 int add_header(const void* key, void* value, void* context) {
     evbuffer_add_printf(context, "%s: %s\r\n", (const char*)key, (char*)value);
@@ -605,39 +596,34 @@ void execute_context() {
     if (status > 0 && !ctx->flag.connection_closed) {
         send_reply(ctx, status);
     } else {
-        uv_close((uv_handle_t*) ctx->con->tcp, free_connection);
+        uv_close((uv_handle_t*)&ctx->con->handle, free_connection);
     }
 }
 void bind_listener(uv_loop_t* loop, const addr_t* ad, int backlog) {
-    int err, fd, one = 1;
-    uv_tcp_t* tcp = malloc(sizeof(uv_tcp_t)); /* leaked intentionally */
-
-    err = uv_tcp_init(loop, tcp);
-    if (err != 0) {
-        FLOG("Failed to initialize tcp socket %s", uv_strerror(err));
-    }
+    int fd, one = 1;
+    uv_poll_t* poll = malloc(sizeof(uv_poll_t));
 
     fd = socket(AF_INET, SOCK_STREAM, 0);
-    err = setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one));
+    if (fd < 0) {
+        FLOG("Failed to create TCP socket %s", strerror(errno));
+    }
 
-    if (err != 0) {
+    uv_poll_init(loop, poll, fd);
+
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one)) != 0) {
         FLOG("Failed to set SO_REUSEPORT %s", strerror(errno));
     }
 
-    err = uv_tcp_open(tcp, fd);
-    if (err != 0) {
-        FLOG("Failed to open tcp handle %s", uv_strerror(err));
+    if (bind(fd, ad->sa, ad->af == AF_INET ? sizeof(ad->sin) : sizeof(ad->sin6)) != 0) {
+        FLOG("Failed to bind on specified listen port: %s", strerror(errno));
     }
 
-    err = uv_tcp_bind(tcp, ad->sa, 0);
-    if (err != 0) {
-        FLOG("Tcp bind failed %s", uv_strerror(err));
+    if (listen(fd, backlog) != 0) {
+        FLOG("Failed to init listen: %s", strerror(errno));
     }
 
-    err = uv_listen((uv_stream_t*) tcp, backlog, on_new_connection);
-    if (err != 0) {
-        FLOG("Tcp listen failed %s", uv_strerror(err));
-    }
+    poll->data = (void*) (long) fd;
+    uv_poll_start(poll, UV_READABLE, accept_poll);
 }
 void run_loop(void* lv) {
     appster_t* a;
@@ -674,102 +660,110 @@ void run_loop(void* lv) {
         }
     }
 }
-void on_new_connection(uv_stream_t *tcp, int status) {
-    int err;
+void accept_poll(uv_poll_t* handle, int status, int events) {
+    int fd, err;
+    addr_t addr;
+    socklen_t len = sizeof(addr);
+    connection_t* con;
 
     if (status < 0) {
-        ELOG("New connection error %s", uv_strerror(status));
+        ELOG("uv error %s", uv_strerror(status));
         return;
     }
 
-    uv_tcp_t* c = calloc(1, sizeof(uv_tcp_t));
-    err = uv_tcp_init(tcp->loop, c);
+    fd = accept((long) handle->data, addr.sa, &len);
 
-    if (err != 0) {
-        goto fail;
+    if (fd == -1) {
+        ELOG("Error accepting new connection: %s", strerror(errno));
+        return;
     }
 
-    err = uv_accept(tcp, (uv_stream_t*) c);
+    con = calloc(1, sizeof(connection_t));
 
+    err = uv_poll_init(handle->loop, &con->handle, fd);
     if (err != 0) {
-        goto fail;
-    }
-
-    uv_read_start((uv_stream_t*) c, alloc_cb, read_cb);
-
-    connection_t* con = calloc(1, sizeof(connection_t));
-
-    http_parser_init(con->parser, HTTP_REQUEST);
-    vector_setup(con->contexts, 5, sizeof(context_t*));
-
-    c->data = con;
-    con->tcp = (uv_stream_t*) c;
-    con->parser->data = con;
-
-fail:
-    if (err) {
         ELOG("Failed to accept on tcp socket %s", uv_strerror(err));
-        uv_close((uv_handle_t*) c, free_connection);
+        free(con);
+        close(fd);
+    } else {
+        http_parser_init(con->parser, HTTP_REQUEST);
+        vector_setup(con->contexts, 5, sizeof(context_t*));
+
+        con->handle.data = con;
+        con->parser->data = con;
+        con->fd = fd;
+
+        uv_poll_start(&con->handle, UV_READABLE, read_poll);
+
+        DLOG("Accepted new connection and reading data...");
     }
 }
-void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    buf->base = malloc(suggested_size);
-    buf->len = suggested_size;
-}
-void read_cb (uv_stream_t* c, ssize_t nread, const uv_buf_t* buf) {
-    connection_t* con = c->data;
+void error_poll(uv_poll_t* handle) {
+    connection_t* con = handle->data;
     context_t* ctx;
+
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        /* Ignore EAGAIN */
+        return;
+    }
+
+    DLOG("Got ERROR on connection, closing; error: %s", strerror(errno));
+
+    if (vector_size(con->contexts)) {
+        ctx = parser_get_context(con->parser);
+
+        if (as_channel_good(ctx->read_ch)) { /* expecting a read */
+            ctx->flag.body_done = 1;
+            ctx->flag.connection_closed = 1;
+            as_channel_send(ctx->read_ch, NULL);
+            return; /* close the connection after callback is finished */
+        }
+    }
+
+    uv_close((uv_handle_t*) handle, free_connection);
+}
+void read_poll(uv_poll_t* handle, int status, int events) {
+    connection_t* con = handle->data;
+    int nread;
+    char buf[16 * 1024];
+
+    if (status < 0) {
+        ELOG("uv error %s", uv_strerror(status));
+        return;
+    }
+
+    while ((nread = read(con->fd, buf, sizeof(buf))) > 0) {
+        if (nread != http_parser_execute(con->parser, &incoming, buf, nread)) {
+            DLOG("Closing connection due http error");
+            uv_close((uv_handle_t*) handle, free_connection);
+            return;
+        }
+    }
 
     if (nread < 0) {
-        if (nread == UV__EOF) {
-            DLOG("Got EOF on connection, closing");
-
-            if (vector_size(con->contexts)) {
-                ctx = parser_get_context(con->parser);
-
-                if (as_channel_good(ctx->read_ch)) { /* expecting a read */
-                    ctx->flag.body_done = 1;
-                    ctx->flag.connection_closed = 1;
-                    as_channel_send(ctx->read_ch, NULL);
-
-                    free(buf->base);
-                    return; /* close the connection after callback is finished */
-                }
-            }
-
-            uv_close((uv_handle_t*) c, free_connection);
-        }
-    } else if (nread > 0) {
-        if (nread != http_parser_execute(con->parser, &incoming, buf->base, buf->len)) {
-            DLOG("Closing connection due http error");
-            uv_close((uv_handle_t*) c, free_connection);
-        }
+        error_poll(handle);
+    } else if (nread == 0) {
+        uv_close((uv_handle_t*) handle, free_connection);
     }
-
-    free(buf->base);
 }
-void write_cb(uv_write_t* req, int status) {
+void write_poll(uv_poll_t* handle, int status, int events) {
+    connection_t* con = handle->data;
     context_t* ctx;
 
-    ctx = req->data;
-    if (status) {
-        ELOG("uv_write error: %s\n", uv_strerror(errno));
-        uv_close((uv_handle_t*) req->handle, free_connection);
+    if (status < 0) {
+        ELOG("uv error %s", uv_strerror(status));
         return;
     }
 
-    if (evbuffer_get_length(ctx->send_body)) {
-        uv_buf_t buffer = {
-            ctx->str,
-            evbuffer_remove(ctx->send_body, ctx->str, 65536)
-        };
+    ctx = parser_get_context(con->parser);
 
-        uv_write(ctx->write, ctx->con->tcp, &buffer, 1, write_cb);
+    if (evbuffer_get_length(ctx->send_body)) {
+        evbuffer_write(ctx->send_body, ctx->con->fd);
     } else {
         if (!ctx->flag.should_keepalive) {
-            uv_close((uv_handle_t*) req->handle, free_connection);
+            uv_close((uv_handle_t*) handle, free_connection);
         } else {
-            uv_read_start((uv_stream_t*)ctx->con->tcp, alloc_cb, read_cb);
+            uv_poll_start(handle, UV_READABLE, read_poll);
             vector_pop_front(ctx->con->contexts);
             free_context(ctx);
         }
@@ -798,7 +792,6 @@ void free_connection(uv_handle_t* handle) {
     connection_t* con;
 
     if (!handle || !handle->data) {
-        free(handle);
         return;
     }
 
@@ -810,7 +803,8 @@ void free_connection(uv_handle_t* handle) {
 
     vector_destroy(con->contexts);
     free(con);
-    free(handle);
+
+    DLOG("Connection closed");
 }
 int on_parse_error(context_t* ctx) {
     hm_foreach(ctx->headers, hm_cb_free, (void*) 1);
@@ -930,7 +924,7 @@ int on_inc_headers_complete(__AP_EVENT_CB) {
     }
 
     /* stop the connection */
-    uv_read_stop((uv_stream_t*)ctx->con->tcp);
+    uv_poll_stop(&ctx->con->handle);
 
     __current_ctx = ctx;
 
