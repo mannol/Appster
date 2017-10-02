@@ -12,6 +12,10 @@ struct appster_s {
     vector_t loops;
     struct error_cb_s* general_error_cb;
     vector_t modules;
+#ifdef HAS_CRYPTO
+    const char* cert_chain_file;
+    const char* key_file;
+#endif
 };
 
 #endif

@@ -38,6 +38,24 @@ typedef union appster_channel_u
 
 appster_t* as_alloc(unsigned threads);
 void as_free(appster_t* a);
+/*
+ The global cleanup function is used to free some global contexts that are
+ allocated at some point during run cycle. Usually this function is not required
+ to be called but it can serve to help diagnose memory leaks as it frees,
+ normally, non-free'd data. Example is: deallocation of OpenSSL library globals
+ */
+void as_global_cleanup();
+#ifdef HAS_CRYPTO
+/*
+ To enable SSL/TLS, each appster instance requires 2 file paths. First file path
+ is the path to the, prefferably full, chain in PEM format. The second file path
+ is the path to the private key, also, in PEM format. If the files are not valid
+ the appster will fail with fatal error on next as_listen_and_serve. Setting any
+ of these values to NULL disables crypto for this instace.
+ */
+void as_load_ssl_cert_and_key(appster_t* a, const char* certificate_chain_path, const char* private_key_file_path);
+#endif
+
 
 /* NOTE: once added, route cannot be romoved! */
 int as_add_route(appster_t* a, const char* path, as_route_cb_t cb, appster_schema_entry_t* schema, void* user_data);

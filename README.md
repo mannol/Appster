@@ -5,8 +5,9 @@ Appster brings the async/await pattern to C http API and enables writing __fast_
 Basic features:
 - Tiny
 - Utilizes [structured concurrency](http://libdill.org/structured-concurrency.html)
-- Full http 1.0 and 1.1 support.
-- Scalable (You can say that for every http server...)
+- Full http 1.0 and 1.1 support
+- Full SSL/TLS support
+- Scalable
 - Can use all processor cores without locking overhead
 - Supports modules. Currently, built in modules are:
   - redis

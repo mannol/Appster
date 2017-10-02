@@ -6,6 +6,10 @@
 #include "schema.h"
 #include "http_parser.h"
 
+#ifdef HAS_CRYPTO
+    #include "crypto.h"
+#endif
+
 #include <stdlib.h>
 #include <ctype.h>
 #include <uv.h>
@@ -42,6 +46,9 @@ typedef struct connection_s {
     vector_t contexts;
     uv_poll_t handle;
     int fd;
+#ifdef HAS_CRYPTO
+    ssl_t* ssl;
+#endif
 } connection_t;
 
 typedef union addr_u {
@@ -50,6 +57,14 @@ typedef union addr_u {
     struct sockaddr_in sin[1];
     struct sockaddr_in6 sin6[1];
 } addr_t;
+
+typedef struct listener_s {
+    uv_poll_t handle;
+    int fd;
+#ifdef HAS_CRYPTO
+    ssl_ctx_t* ssl_ctx;
+#endif
+} listener_t;
 
 __thread context_t* __current_ctx = NULL;
 
@@ -83,6 +98,7 @@ static void read_poll(uv_poll_t* handle, int status, int events);
 static void write_poll(uv_poll_t* handle, int status, int events);
 static void free_context(context_t* ctx);
 static void free_connection(uv_handle_t* handle);
+static int write_connection(connection_t* con, evbuffer_t* buf);
 /* Incoming message parsing functions */
 static int on_parse_error(context_t* ctx);
 static int on_message_begin(__AP_EVENT_CB);
@@ -136,6 +152,11 @@ appster_t* as_alloc(unsigned threads) {
     rc->general_error_cb->user_data = NULL;
     rc->routes = hm_alloc(10, NULL, NULL);
     rc->error_cbs = hm_alloc(10, NULL, NULL);
+
+#ifdef HAS_CRYPTO
+    crypto_alloc();
+#endif
+
     return rc;
 
 fail:
@@ -143,8 +164,9 @@ fail:
     return NULL;
 }
 void as_free(appster_t* a) {
-    if (!a)
+    if (!a) {
         return;
+    }
 
     VECTOR_FOR_EACH(a->loops, loop) {
         uv_loop_close(ITERATOR_GET_AS(uv_loop_t*, &loop));
@@ -170,6 +192,21 @@ void as_free(appster_t* a) {
     free(a->general_error_cb);
     free(a);
 }
+void as_global_cleanup() {
+#ifdef HAS_CRYPTO
+    crypto_free();
+#endif
+}
+#ifdef HAS_CRYPTO
+void as_load_ssl_cert_and_key(appster_t* a, const char* certificate_chain_path, const char* private_key_file_path) {
+    if (!a) {
+        return;
+    }
+
+    a->cert_chain_file = certificate_chain_path;
+    a->key_file = private_key_file_path;
+}
+#endif
 int as_add_route(appster_t* a, const char* path, as_route_cb_t cb, appster_schema_entry_t* schema, void* user_data) {
     static appster_schema_entry_t empty_schema[] = { { NULL } };
     schema_t* sh;
@@ -226,17 +263,17 @@ int as_listen_and_serve(appster_t* a, const char* addr, uint16_t port, int backl
     }
 
     if (!vector_size(a->loops)) {
-        bind_listener(uv_default_loop(), &ad, backlog);
         uv_default_loop()->data = a;
+        bind_listener(uv_default_loop(), &ad, backlog);
         run_loop(uv_default_loop());
     } else  {
         VECTOR_FOR_EACH(a->loops, loop) {
+            ITERATOR_GET_AS(uv_loop_t*, &loop)->data = a;
             bind_listener(ITERATOR_GET_AS(uv_loop_t*, &loop), &ad, backlog);
         }
         vector_setup(threads, vector_size(a->loops), sizeof(uv_thread_t));
 
         VECTOR_FOR_EACH(a->loops, loop) {
-            ITERATOR_GET_AS(uv_loop_t*, &loop)->data = a;
             err = uv_thread_create(&id, run_loop, ITERATOR_GET_AS(uv_loop_t*, &loop));
             if (err != 0) {
                 FLOG("Failed to create thread %s", uv_strerror(err));
@@ -523,6 +560,7 @@ int basic_error(void* data) {
 }
 void send_reply(context_t* ctx, int status) {
     evbuffer_t* buf;
+    int err;
 
     buf = evbuffer_new();
 
@@ -552,8 +590,19 @@ void send_reply(context_t* ctx, int status) {
 
     ctx->send_body = buf;
 
-    evbuffer_write(buf, ctx->con->fd);
-    uv_poll_start(&ctx->con->handle, UV_WRITABLE, write_poll);
+    err = write_connection(ctx->con, buf);
+    if (err != 0) {
+    #ifdef HAS_CRYPTO
+        err = crypto_error_needs_data_only(ctx->con->ssl, err);
+        if (err) {
+            uv_poll_start(&ctx->con->handle, err, write_poll);
+        } else {
+            uv_close((uv_handle_t*) &ctx->con->handle, free_connection);
+        }
+    #endif
+    } else {
+        uv_poll_start(&ctx->con->handle, UV_WRITABLE, write_poll);
+    }
 }
 int add_header(const void* key, void* value, void* context) {
     evbuffer_add_printf(context, "%s: %s\r\n", (const char*)key, (char*)value);
@@ -601,14 +650,17 @@ void execute_context() {
 }
 void bind_listener(uv_loop_t* loop, const addr_t* ad, int backlog) {
     int fd, one = 1;
-    uv_poll_t* poll = malloc(sizeof(uv_poll_t));
+    listener_t* lsnr = calloc(1, sizeof(listener_t));
+    appster_t* a;
+
+    a = loop->data;
 
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
         FLOG("Failed to create TCP socket %s", strerror(errno));
     }
 
-    uv_poll_init(loop, poll, fd);
+    uv_poll_init(loop, &lsnr->handle, fd);
 
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one)) != 0) {
         FLOG("Failed to set SO_REUSEPORT %s", strerror(errno));
@@ -622,8 +674,21 @@ void bind_listener(uv_loop_t* loop, const addr_t* ad, int backlog) {
         FLOG("Failed to init listen: %s", strerror(errno));
     }
 
-    poll->data = (void*) (long) fd;
-    uv_poll_start(poll, UV_READABLE, accept_poll);
+    lsnr->handle.data = lsnr;
+    lsnr->fd = fd;
+#ifdef HAS_CRYPTO
+    if (a->cert_chain_file && a->key_file) {
+        lsnr->ssl_ctx = crypto_alloc_ctx(CM_SERVER, a->cert_chain_file, a->key_file);
+        if (!lsnr->ssl_ctx) {
+            FLOG("Failed to initialize SSL context");
+        }
+    } else {
+        DLOG("Did not attach SSL context to the listener because of missing cert chain");
+    }
+#else
+    (void) a; /* Avoid unused-but-set-variable warning */
+#endif
+    uv_poll_start(&lsnr->handle, UV_READABLE, accept_poll);
 }
 void run_loop(void* lv) {
     appster_t* a;
@@ -662,16 +727,19 @@ void run_loop(void* lv) {
 }
 void accept_poll(uv_poll_t* handle, int status, int events) {
     int fd, err;
+    listener_t* lsnr;
     addr_t addr;
     socklen_t len = sizeof(addr);
     connection_t* con;
+
+    lsnr = handle->data;
 
     if (status < 0) {
         ELOG("uv error %s", uv_strerror(status));
         return;
     }
 
-    fd = accept((long) handle->data, addr.sa, &len);
+    fd = accept(lsnr->fd, addr.sa, &len);
 
     if (fd == -1) {
         ELOG("Error accepting new connection: %s", strerror(errno));
@@ -693,8 +761,17 @@ void accept_poll(uv_poll_t* handle, int status, int events) {
         con->parser->data = con;
         con->fd = fd;
 
+    #ifdef HAS_CRYPTO
+        if (lsnr->ssl_ctx) {
+            con->ssl = crypto_alloc_ssl(lsnr->ssl_ctx, con->fd, CM_SERVER);
+            if (!con->ssl) {
+                ELOG("SSL alloc error!");
+                uv_close((uv_handle_t*) &con->handle, free_connection);
+                return;
+            }
+        }
+    #endif
         uv_poll_start(&con->handle, UV_READABLE, read_poll);
-
         DLOG("Accepted new connection and reading data...");
     }
 }
@@ -732,23 +809,57 @@ void read_poll(uv_poll_t* handle, int status, int events) {
         return;
     }
 
-    while ((nread = read(con->fd, buf, sizeof(buf))) > 0) {
-        if (nread != http_parser_execute(con->parser, &incoming, buf, nread)) {
-            DLOG("Closing connection due http error");
-            uv_close((uv_handle_t*) handle, free_connection);
-            return;
+#ifdef HAS_CRYPTO
+    if (con->ssl) {
+        while ((nread = crypto_read(con->ssl, buf, sizeof(buf))) > 0) {
+            if (nread != http_parser_execute(con->parser, &incoming, buf, nread)) {
+                DLOG("Closing connection due http error");
+                uv_close((uv_handle_t*) handle, free_connection);
+                return;
+            }
         }
-    }
+    } else
+        /* read from fd directly */
+#endif
+        while ((nread = read(con->fd, buf, sizeof(buf))) > 0) {
+            if (nread != http_parser_execute(con->parser, &incoming, buf, nread)) {
+                DLOG("Closing connection due http error");
+                uv_close((uv_handle_t*) handle, free_connection);
+                return;
+            }
+        }
 
     if (nread < 0) {
-        error_poll(handle);
+    #ifdef HAS_CRYPTO
+        if (con->ssl) {
+            nread = crypto_error_needs_data_only(con->ssl, nread);
+            /*
+             Same as with crypto_write, crypto_read can trigger transparent
+             re-negotiation too. So, to handle it just re-register the events.
+             */
+            if (nread) {
+                uv_poll_start(handle, nread, read_poll);
+            }
+        } else
+    #endif
+            error_poll(handle);
     } else if (nread == 0) {
         uv_close((uv_handle_t*) handle, free_connection);
+    } else {
+    #ifdef HAS_CRYPTO
+        /*
+         Extra step to make sure we are not left in WRITABLE state after
+         re-negotiation. No SYSCALL is made because libuv short circuits when
+         events are unchanged.
+         */
+        uv_poll_start(handle, UV_READABLE, read_poll);
+    #endif
     }
 }
 void write_poll(uv_poll_t* handle, int status, int events) {
     connection_t* con = handle->data;
     context_t* ctx;
+    int err;
 
     if (status < 0) {
         ELOG("uv error %s", uv_strerror(status));
@@ -758,8 +869,26 @@ void write_poll(uv_poll_t* handle, int status, int events) {
     ctx = parser_get_context(con->parser);
 
     if (evbuffer_get_length(ctx->send_body)) {
-        evbuffer_write(ctx->send_body, ctx->con->fd);
-    } else {
+        err = write_connection(ctx->con, ctx->send_body);
+        if (err != 0) {
+        #ifdef HAS_CRYPTO
+            /*
+             crypto_write can trigger transparent re-negotiation if required. To
+             cope with that, we need to wait for socket to become writable or
+             readable, depending on what the negotiation step requires.
+             */
+            err = crypto_error_needs_data_only(con->ssl, err);
+            if (err) {
+                uv_poll_start(handle, err, write_poll);
+            } else {
+                uv_close((uv_handle_t*) handle, free_connection);
+            }
+        #endif
+        }
+    }
+
+    /* Check again to see if the buffer has been drained */
+    if (!evbuffer_get_length(ctx->send_body)) {
         if (!ctx->flag.should_keepalive) {
             uv_close((uv_handle_t*) handle, free_connection);
         } else {
@@ -801,10 +930,34 @@ void free_connection(uv_handle_t* handle) {
         free_context(ITERATOR_GET_AS(context_t*, &msg));
     }
 
+#ifdef HAS_CRYPTO
+    crypto_free_ssl(con->ssl);
+#endif
+
     vector_destroy(con->contexts);
+    close(con->fd);
     free(con);
 
     DLOG("Connection closed");
+}
+int write_connection(connection_t *con, evbuffer_t *buf) {
+#ifdef HAS_CRYPTO
+    if (con->ssl) {
+        char cbuf[16 * 1024];
+        int len = evbuffer_copyout(buf, cbuf, sizeof(cbuf));
+
+        len = crypto_write(con->ssl, cbuf, len);
+        if (len < 0) {
+            ELOG("Error preforming SSL write");
+            return -1;
+        } else {
+            evbuffer_drain(buf, len);
+        }
+    } else
+        /* Write to fd */
+#endif
+        evbuffer_write(buf, con->fd);
+    return 0;
 }
 int on_parse_error(context_t* ctx) {
     hm_foreach(ctx->headers, hm_cb_free, (void*) 1);

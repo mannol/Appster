@@ -20,7 +20,7 @@ int exec_write(void* data) {
     as_write("Hello ", -1); /* pass -1 to use strlen() to calculate len */
     as_write(binary, 6); /* send binary data */
     as_write_f("This is an example of sending %s output\n", "formatted");
-    as_write_file("../../example.txt", 0, -1);
+    as_write_file("../example.txt", 0, -1);
     as_write("Files are not loaded into memory while sending!!!\n", -1);
 
     return 200;
@@ -34,7 +34,13 @@ int main() {
 
     appster_t* a = as_alloc(1);
 
+#ifdef HAS_CRYPTO
+    /* Serve as https */
+    as_load_ssl_cert_and_key(a, "cert.crt", "private.key");
+#endif
+
     as_add_route(a, "/write", exec_write, schema, NULL);
+    as_add_route(a, "/", exec_write, NULL, NULL);
 
     as_listen_and_serve(a, "0.0.0.0", 8080, 2048);
     as_free(a);
@@ -44,4 +50,16 @@ int main() {
 /*
  To execute the example, type the following into terminal window:
  curl http://127.0.0.1:8080/write?hello=world
+
+ To try the SSL with https, follow these steps:
+
+ # install openssl tools
+ apt install openssl
+
+ # generate self-signed certificate and a private key
+ openssl req -newkey rsa:2048 -nodes -keyout private.key -x509 -days 365 -out cert.crt
+
+ # run the curl example using -k flag and https schema
+ # -k flag is required to avoid host verification. -k SHOULD BE USED FOR TESTING ONLY!
+ curl -k https://127.0.0.1:8080/write?hello=world
  */
